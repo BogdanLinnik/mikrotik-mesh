@@ -13,6 +13,10 @@ add bridge=bridge interface=ether2
 add bridge=bridge interface=ether3
 add bridge=bridge interface=ether4
 add bridge=bridge interface=ether5
+# CAPsMAN-managed radios are not added to the bridge automatically (datapath.bridge is not
+# applied on this CAP), so add them here. Without this Wi-Fi clients get no DHCP lease.
+add bridge=bridge interface=wifi1
+add bridge=bridge interface=wifi2
 
 # Management address from RB4011 DHCP
 /ip dhcp-client add interface=bridge

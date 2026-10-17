@@ -81,6 +81,7 @@ On an ac3:
 | `capsman print` says `enabled: no`, and configuration/provisioning/security are empty | The import stopped before the Wi-Fi section. Check `/log print` and re-run the missing lines. |
 | ac3 listed in `remote-cap` but no radios in `/interface wifi radio print` | The ac3 radios are disabled or not handed to CAPsMAN. On the ac3: `/interface wifi set [find] configuration.manager=capsman disabled=no` (already in [ac3.rsc](ac3.rsc)). |
 | `cap-wifi1/2` appear but stay disabled (`X`) | The provisioning rules don't match the radio bands. The ac3 radios are 802.11ac and have no `ax`; a rule only matches radios supporting every listed band. Check `/interface wifi radio print detail`. |
+| Clients connect to Wi-Fi but get no DHCP lease / no internet, while wired clients work | The ac3 radios are not bridge ports. Check `/interface bridge port print` on the ac3: `wifi1` and `wifi2` must be listed. Fix: `/interface bridge port add bridge=bridge interface=wifi1` and the same for `wifi2` (already in [ac3.rsc](ac3.rsc)). |
 | CAP never joins | Different RouterOS versions, missing `wifi-qcom-ac`, or the ac3 isn't on the same bridge/LAN as the RB4011. |
 
 ## Notes
