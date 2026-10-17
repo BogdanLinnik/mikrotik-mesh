@@ -43,7 +43,7 @@ add chain=input action=drop connection-state=invalid
 add chain=input action=accept protocol=icmp
 add chain=input action=accept in-interface-list=LAN
 add chain=input action=drop
-add chain=forward action=fasttrack-connection hw-offload=yes connection-state=established,related
+add chain=forward action=fasttrack-connection connection-state=established,related
 add chain=forward action=accept connection-state=established,related,untracked
 add chain=forward action=drop connection-state=invalid
 add chain=forward action=drop connection-state=new connection-nat-state=!dstnat in-interface-list=WAN
