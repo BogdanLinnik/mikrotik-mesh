@@ -1,6 +1,7 @@
 # RB4011: router + CAPsMAN controller
-# Needs: RouterOS 7, package wifi-qcom-ac enabled. Subnet 192.168.89.0/24
-# BEFORE USE: change ADMIN_PASSWORD and WIFI_PASSWORD below.
+# Needs: RouterOS 7.24.5, package wifi-qcom-ac enabled. Subnet 192.168.89.0/24
+# Apply to a freshly reset router only (not idempotent), see README.md.
+# BEFORE USE: change the admin password (/user set) and the Wi-Fi passphrase below.
 
 /system identity set name=rb4011
 
@@ -52,15 +53,18 @@ add chain=forward action=drop connection-state=new connection-nat-state=!dstnat 
 /ip neighbor discovery-settings set discover-interface-list=LAN
 /tool mac-server set allowed-interface-list=LAN
 /tool mac-server mac-winbox set allowed-interface-list=LAN
-/user set admin password="ADMIN_PASSWORD"
+/user set admin password=""
 
 # Wi-Fi (CAPsMAN)
+# Short pause so the wifi package is fully loaded when run via run-after-reset
+:delay 5s
 /interface wifi datapath add name=dp-lan bridge=bridge
-/interface wifi security add name=sec-main authentication-types=wpa2-psk,wpa3-psk passphrase="WIFI_PASSWORD" ft=yes ft-over-ds=yes
+/interface wifi security add name=sec-main authentication-types=wpa2-psk,wpa3-psk passphrase="" ft=yes ft-over-ds=yes
 /interface wifi configuration
-add name=cfg-2g ssid="MyMesh" country=Ukraine security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
-add name=cfg-5g ssid="MyMesh" country=Ukraine security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
+add name=cfg-2g ssid="TP-Link_7D15" country=Ukraine security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
+add name=cfg-5g ssid="TP-Link_7D15-5g" country=Ukraine security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
 /interface wifi provisioning
-add action=create-dynamic-enabled supported-bands=2ghz-n,2ghz-ax master-configuration=cfg-2g
-add action=create-dynamic-enabled supported-bands=5ghz-ac,5ghz-ax master-configuration=cfg-5g
+# hAP ac3 radios are 802.11ac (no ax): a rule only matches radios supporting every listed band
+add action=create-dynamic-enabled supported-bands=2ghz-n master-configuration=cfg-2g
+add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=cfg-5g
 /interface wifi capsman set enabled=yes interfaces=bridge upgrade-policy=none

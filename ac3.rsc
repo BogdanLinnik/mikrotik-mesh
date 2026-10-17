@@ -1,6 +1,7 @@
 # hAP ac3: CAP (access point managed by CAPsMAN on RB4011)
-# Needs: RouterOS 7, package wifi-qcom-ac enabled.
-# BEFORE USE: change ADMIN_PASSWORD, and set a unique identity for each device (ac3-1, ac3-2, ...).
+# Needs: RouterOS 7.24.5, package wifi-qcom-ac enabled (same version as the RB4011).
+# Apply to a freshly reset router only (not idempotent), see README.md.
+# BEFORE USE: change the admin password, and set a unique identity for each device (ac3-1, ac3-2, ...).
 
 /system identity set name=ac3-1
 
@@ -23,7 +24,9 @@ add bridge=bridge interface=ether5
 /ip neighbor discovery-settings set discover-interface-list=LAN
 /tool mac-server set allowed-interface-list=LAN
 /tool mac-server mac-winbox set allowed-interface-list=LAN
-/user set admin password="ADMIN_PASSWORD"
+/user set admin password=""
 
-# Join CAPsMAN
+# Join CAPsMAN: radios must be enabled and handed to the controller,
+# otherwise they stay disabled and are never reported to CAPsMAN
+/interface wifi set [find] configuration.manager=capsman disabled=no
 /interface wifi cap set enabled=yes discovery-interfaces=bridge slaves-static=no
