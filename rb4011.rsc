@@ -1,11 +1,11 @@
-# RB4011: router + CAPsMAN controller
-# Needs: RouterOS 7.24.5, package wifi-qcom-ac enabled. Subnet 192.168.89.0/24
-# Apply to a freshly reset router only (not idempotent), see README.md.
-# BEFORE USE: change the admin password (/user set) and the Wi-Fi passphrase below.
+# RB4011: роутер + контролер CAPsMAN
+# Потрібно: RouterOS 7.24.5, увімкнений пакет wifi-qcom-ac. Підмережа 192.168.89.0/24
+# Застосовувати лише на щойно скинутому роутері (скрипт не ідемпотентний), див. README.md.
+# ПЕРЕД ВИКОРИСТАННЯМ: змініть пароль admin (/user set) та пароль Wi-Fi нижче.
 
 /system identity set name=rb4011
 
-# Bridge and ports (ether1 = WAN)
+# Міст і порти (ether1 = WAN)
 /interface bridge add name=bridge protocol-mode=rstp
 /interface bridge port
 add bridge=bridge interface=ether2
@@ -19,7 +19,7 @@ add bridge=bridge interface=ether9
 add bridge=bridge interface=ether10
 add bridge=bridge interface=sfp-sfpplus1
 
-# Interface lists
+# Списки інтерфейсів
 /interface list add name=LAN
 /interface list add name=WAN
 /interface list member add list=LAN interface=bridge
@@ -36,7 +36,7 @@ add bridge=bridge interface=sfp-sfpplus1
 # NAT
 /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade
 
-# Firewall
+# Файрвол
 /ip firewall filter
 add chain=input action=accept connection-state=established,related,untracked
 add chain=input action=drop connection-state=invalid
@@ -48,7 +48,7 @@ add chain=forward action=accept connection-state=established,related,untracked
 add chain=forward action=drop connection-state=invalid
 add chain=forward action=drop connection-state=new connection-nat-state=!dstnat in-interface-list=WAN
 
-# Hardening
+# Захист (hardening)
 /ip service disable telnet,ftp,www,api,api-ssl
 /ip neighbor discovery-settings set discover-interface-list=LAN
 /tool mac-server set allowed-interface-list=LAN
@@ -56,7 +56,7 @@ add chain=forward action=drop connection-state=new connection-nat-state=!dstnat 
 /user set admin password=""
 
 # Wi-Fi (CAPsMAN)
-# Short pause so the wifi package is fully loaded when run via run-after-reset
+# Коротка пауза, щоб пакет wifi повністю завантажився при запуску через run-after-reset
 :delay 5s
 /interface wifi datapath add name=dp-lan bridge=bridge
 /interface wifi security add name=sec-main authentication-types=wpa2-psk,wpa3-psk passphrase="" ft=yes ft-over-ds=yes
@@ -64,7 +64,7 @@ add chain=forward action=drop connection-state=new connection-nat-state=!dstnat 
 add name=cfg-2g ssid="TP-Link_7D15" country=Ukraine security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
 add name=cfg-5g ssid="TP-Link_7D15-5g" country=Ukraine security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
 /interface wifi provisioning
-# hAP ac3 radios are 802.11ac (no ax): a rule only matches radios supporting every listed band
+# Радіомодулі hAP ac3 працюють у 802.11ac (без ax): правило підходить лише радіо, яке підтримує всі вказані діапазони
 add action=create-dynamic-enabled supported-bands=2ghz-n master-configuration=cfg-2g
 add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=cfg-5g
 /interface wifi capsman set enabled=yes interfaces=bridge upgrade-policy=none

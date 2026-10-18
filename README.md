@@ -1,90 +1,91 @@
 # MikroTik Wi-Fi mesh
 
-Wired-backhaul Wi-Fi mesh: an RB4011 is the router and CAPsMAN controller, and one or more hAP ac3 units are managed access points (CAPs).
+Wi-Fi mesh із дротовим підключенням точок доступу: RB4011 є роутером і контролером CAPsMAN, а одна чи кілька hAP ac3 — керовані точки доступу (CAP).
 
-| File | Device | Role |
+| Файл | Пристрій | Роль |
 |---|---|---|
-| [rb4011.rsc](rb4011.rsc) | RB4011iGS+5HacQ2HnD | Router, DHCP/DNS, NAT, firewall, CAPsMAN controller |
-| [ac3.rsc](ac3.rsc) | hAP ac3 (one or more) | CAP: bridged switch + radios managed by the RB4011 |
+| [rb4011.rsc](rb4011.rsc) | RB4011iGS+5HacQ2HnD | Роутер, DHCP/DNS, NAT, файрвол, контролер CAPsMAN |
+| [ac3.rsc](ac3.rsc) | hAP ac3 (одна чи кілька) | CAP: міст-комутатор + радіо під керуванням RB4011 |
 
-## Network
+## Мережа
 
-- LAN `192.168.89.0/24`, router `192.168.89.1`, DHCP pool `.100`-`.254`.
-- `ether1` on the RB4011 is the WAN (DHCP client). Everything else is bridged into the LAN.
-- SSIDs: `TP-Link_7D15` (2.4 GHz) and `TP-Link_7D15-5g` (5 GHz), WPA2/WPA3-PSK, 802.11r/k/v roaming enabled.
-- Each ac3 connects to an RB4011 LAN port by cable, gets a management address by DHCP and joins CAPsMAN over the bridge.
+- LAN `192.168.89.0/24`, роутер `192.168.89.1`, пул DHCP `.100`-`.254`.
+- `ether1` на RB4011 — це WAN (DHCP-клієнт). Усі інші порти об'єднані в LAN-міст.
+- SSID: `TP-Link_7D15` (2.4 ГГц) і `TP-Link_7D15-5g` (5 ГГц), WPA2/WPA3-PSK, увімкнений роумінг 802.11r/k/v.
+- Кожна ac3 підключається кабелем до LAN-порту RB4011, отримує адресу керування по DHCP і приєднується до CAPsMAN через міст.
 
-## Requirements
+## Вимоги
 
-- RouterOS **7.24.5** on all devices (use the same version everywhere).
-- Package `wifi-qcom-ac` installed and enabled, and `wireless` disabled. Check with `/system package print`. Packages survive a configuration reset.
+- RouterOS **7.24.5** на всіх пристроях (скрізь має бути одна версія).
+- Пакет `wifi-qcom-ac` встановлений і увімкнений, а `wireless` вимкнений. Перевірка: `/system package print`. Пакети зберігаються після скидання конфігурації.
 
-## Before you start
+## Перед початком
 
-The scripts contain a plaintext admin password and Wi-Fi passphrase. Change them (`/user set admin password=...` in both files, `passphrase=...` in [rb4011.rsc](rb4011.rsc)) before using them on real devices, and don't push the repo anywhere public with real values in it.
+Скрипти містять пароль admin і пароль Wi-Fi у відкритому вигляді. Змініть їх (`/user set admin password=...` в обох файлах, `passphrase=...` у [rb4011.rsc](rb4011.rsc)) перед використанням на реальних пристроях і не публікуйте репозиторій із реальними паролями.
 
-Each ac3 needs its own identity. Edit the `/system identity set name=ac3-1` line in a copy of [ac3.rsc](ac3.rsc) (ac3-2, ac3-3, ...), or run `/system identity set name=ac3-2` after the reset.
+Кожна ac3 потребує власного імені. Змініть рядок `/system identity set name=ac3-1` у копії [ac3.rsc](ac3.rsc) (ac3-2, ac3-3, ...) або виконайте `/system identity set name=ac3-2` після скидання.
 
-## Apply a script
+## Застосування скрипта
 
-The scripts are meant for a freshly reset router and are not idempotent. Running one twice fails on duplicate entries.
+Скрипти призначені для щойно скинутого роутера і не є ідемпотентними. Повторний запуск завершиться помилками через дублікати записів.
 
-1. Upload the `.rsc` file to the router's root file list (WinBox: Files, drag and drop; or `scp rb4011.rsc admin@<router>:`).
-2. Reset the router and run the file afterwards:
+1. Завантажте `.rsc` файл у кореневий каталог файлів роутера (WinBox: Files, перетягнути файл; або `scp rb4011.rsc admin@<router>:`).
+2. Скиньте роутер і запустіть файл після скидання:
    ```
    /system reset-configuration no-defaults=yes skip-backup=yes run-after-reset=rb4011.rsc
    ```
-   Use `run-after-reset=ac3.rsc` on an ac3.
-3. Wait for the reboot. The script runs on first boot.
+   Для ac3 використовуйте `run-after-reset=ac3.rsc`.
+3. Дочекайтеся перезавантаження. Скрипт виконується при першому запуску.
 
-The reset wipes the router's IP configuration, so reconnect with MAC-WinBox (or a cable and a static IP) if needed. The RB4011 comes back on `192.168.89.1` once the script has run.
+Скидання стирає IP-конфігурацію роутера, тому за потреби підключайтеся через MAC-WinBox (або кабелем зі статичною адресою). RB4011 буде доступний за адресою `192.168.89.1` після виконання скрипта.
 
-### Order
+### Порядок
 
-Set up the RB4011 first, then the ac3 units. The order is forgiving, but this is the smooth path:
+Спочатку налаштуйте RB4011, потім ac3. Порядок не критичний, але так усе проходить найгладше:
 
-- The ac3 gets its management address from the RB4011 DHCP server and discovers the CAPsMAN controller over the bridge, so both need to be up.
-- If you configure an ac3 first, nothing breaks. Its script doesn't depend on the RB4011. Once the RB4011 is up the ac3 should get an address and join on its own, which can take a minute or two. Unplugging and replugging the cable speeds it up.
-- Connect each ac3 to a LAN port on the RB4011 (ether2-10 or the SFP+ port), never to ether1 (WAN).
-- You can reset an ac3 with the cable unplugged and plug it in after the RB4011 script has finished.
-- After the ac3 joins, it appears in `/interface wifi capsman remote-cap print` on the RB4011, and the dynamic `cap-wifi` interfaces lose the `X` (disabled) flag.
+- ac3 отримує адресу керування від DHCP-сервера на RB4011 і знаходить контролер CAPsMAN через міст, тому обидва пристрої мають працювати.
+- Якщо налаштувати ac3 першою, нічого не зламається. Її скрипт не залежить від RB4011. Коли RB4011 запрацює, ac3 має сама отримати адресу й приєднатися; це може зайняти хвилину-дві. Витягніть і знову вставте кабель, щоб прискорити.
+- Підключайте кожну ac3 до LAN-порту RB4011 (ether2-10 або SFP+), ніколи до ether1 (WAN).
+- ac3 можна скинути з відключеним кабелем і підключити його після завершення скрипта на RB4011.
+- Після приєднання ac3 з'являється в `/interface wifi capsman remote-cap print` на RB4011, а динамічні інтерфейси `cap-wifi` втрачають прапорець `X` (вимкнено).
 
-If the script stops partway, everything before the failing line stays applied. Look at `/log print` for the error.
+Якщо скрипт зупинився посередині, усе до рядка з помилкою залишається застосованим. Помилку дивіться в `/log print`.
 
-## Verify
+## Перевірка
 
-On the RB4011:
+На RB4011:
 
 ```
 /ip dhcp-client print                       # ether1 bound
 /ping 1.1.1.1 count=3
 /interface wifi capsman print               # enabled: yes
-/interface wifi capsman remote-cap print    # each ac3 listed, state Ok
-/interface wifi radio print                 # local radio plus two radios per ac3
-/interface wifi print                       # cap-wifi1, cap-wifi2 ... not flagged X
-/interface wifi registration-table print    # connected Wi-Fi clients
+/interface wifi capsman remote-cap print    # кожна ac3 у списку, state Ok
+/interface wifi radio print                 # локальне радіо плюс два радіо на кожну ac3
+/interface wifi print                       # cap-wifi1, cap-wifi2 ... без прапорця X
+/interface wifi registration-table print    # підключені Wi-Fi клієнти
 ```
 
-On an ac3:
+На ac3:
 
 ```
 /ip dhcp-client print                       # bridge bound, 192.168.89.x
 /interface wifi cap print                   # enabled: yes
-/interface wifi print                       # radios no longer disabled
+/interface wifi print                       # радіо більше не вимкнені
+/interface bridge port print                # wifi1 і wifi2 є портами моста
 /log print where topics~"wifi"
 ```
 
-## Troubleshooting
+## Усунення несправностей
 
-| Symptom | Cause / fix |
+| Симптом | Причина / рішення |
 |---|---|
-| `capsman print` says `enabled: no`, and configuration/provisioning/security are empty | The import stopped before the Wi-Fi section. Check `/log print` and re-run the missing lines. |
-| ac3 listed in `remote-cap` but no radios in `/interface wifi radio print` | The ac3 radios are disabled or not handed to CAPsMAN. On the ac3: `/interface wifi set [find] configuration.manager=capsman disabled=no` (already in [ac3.rsc](ac3.rsc)). |
-| `cap-wifi1/2` appear but stay disabled (`X`) | The provisioning rules don't match the radio bands. The ac3 radios are 802.11ac and have no `ax`; a rule only matches radios supporting every listed band. Check `/interface wifi radio print detail`. |
-| Clients connect to Wi-Fi but get no DHCP lease / no internet, while wired clients work | The ac3 radios are not bridge ports. Check `/interface bridge port print` on the ac3: `wifi1` and `wifi2` must be listed. Fix: `/interface bridge port add bridge=bridge interface=wifi1` and the same for `wifi2` (already in [ac3.rsc](ac3.rsc)). |
-| CAP never joins | Different RouterOS versions, missing `wifi-qcom-ac`, or the ac3 isn't on the same bridge/LAN as the RB4011. |
+| `capsman print` показує `enabled: no`, а configuration/provisioning/security порожні | Імпорт зупинився до секції Wi-Fi. Перегляньте `/log print` і виконайте пропущені рядки. |
+| ac3 є в `remote-cap`, але радіо немає в `/interface wifi radio print` | Радіо ac3 вимкнені або не передані CAPsMAN. На ac3: `/interface wifi set [find] configuration.manager=capsman disabled=no` (вже є в [ac3.rsc](ac3.rsc)). |
+| `cap-wifi1/2` з'явилися, але лишаються вимкненими (`X`) | Правила provisioning не підходять під діапазони радіо. Радіо ac3 працюють у 802.11ac і не мають `ax`; правило підходить лише радіо, яке підтримує всі вказані діапазони. Перевірте `/interface wifi radio print detail`. |
+| Клієнти підключаються до Wi-Fi, але не отримують DHCP-адресу / немає інтернету, а дротові клієнти працюють | Радіо ac3 не є портами моста. Перевірте `/interface bridge port print` на ac3: `wifi1` і `wifi2` мають бути в списку. Рішення: `/interface bridge port add bridge=bridge interface=wifi1` і так само для `wifi2` (вже є в [ac3.rsc](ac3.rsc)). |
+| CAP не приєднується | Різні версії RouterOS, відсутній `wifi-qcom-ac` або ac3 не в тому самому мості/LAN, що й RB4011. |
 
-## Notes
+## Примітки
 
-- The RB4011's own radio (`wifi1`) is not managed by CAPsMAN and stays disabled. Enable it and set `configuration.manager=capsman-or-local` if you want it to serve the same SSIDs.
-- Firewall: the RB4011 accepts input only from the LAN and from established connections, and blocks new connections from the WAN. Services other than SSH and WinBox are disabled, and neighbor discovery and MAC-server access are limited to the LAN.
+- Власне радіо RB4011 (`wifi1`) не керується CAPsMAN і залишається вимкненим. Увімкніть його і встановіть `configuration.manager=capsman-or-local`, якщо хочете, щоб воно теж роздавало ці SSID.
+- Файрвол: RB4011 приймає вхідний трафік лише з LAN і для встановлених з'єднань, нові з'єднання з WAN блокуються. Усі сервіси, окрім SSH і WinBox, вимкнені, а neighbor discovery і MAC-сервер обмежені LAN.
