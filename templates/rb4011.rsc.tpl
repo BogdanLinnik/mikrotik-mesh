@@ -1,4 +1,4 @@
-# {{IDENTITY}}: роутер + контролер CAPsMAN
+# {{IDENTITY}}: роутер + контролер CAPsMAN + власне радіо (5 ГГц) як частина мережі
 # Згенеровано generate.py зі шаблону templates/rb4011.rsc.tpl. Не редагуйте цей файл, змінюйте шаблон або .env.
 # Потрібно: RouterOS 7.24.5, увімкнений пакет wifi-qcom-ac. Підмережа 192.168.89.0/24
 # Застосовувати лише на щойно скинутому роутері (скрипт не ідемпотентний), див. README.md.
@@ -92,3 +92,10 @@ add action=create-dynamic-enabled supported-bands=2ghz-n master-configuration=cf
 add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=cfg-main
 #@end
 /interface wifi capsman set enabled=yes interfaces=bridge upgrade-policy=none
+
+# Власне радіо RB4011 (wifi1, лише 5 ГГц) теж віддаємо під керування CAPsMAN, тож RB4011 є частиною мережі
+# і роздає ту саму мережу, що й точки доступу. Ці рядки в кінці файлу навмисно: якщо вони не виконаються,
+# решта конфігурації вже застосована.
+/interface wifi set wifi1 configuration.manager=capsman-or-local disabled=no
+# Як і на точках доступу, радіо під керуванням CAPsMAN не потрапляє в міст автоматично, тому додаємо його вручну
+/interface bridge port add bridge=bridge interface=wifi1
