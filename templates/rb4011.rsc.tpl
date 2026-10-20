@@ -1,9 +1,9 @@
-# RB4011: роутер + контролер CAPsMAN
+# {{IDENTITY}}: роутер + контролер CAPsMAN
+# Згенеровано generate.py зі шаблону templates/rb4011.rsc.tpl. Не редагуйте цей файл, змінюйте шаблон або .env.
 # Потрібно: RouterOS 7.24.5, увімкнений пакет wifi-qcom-ac. Підмережа 192.168.89.0/24
 # Застосовувати лише на щойно скинутому роутері (скрипт не ідемпотентний), див. README.md.
-# ПЕРЕД ВИКОРИСТАННЯМ: змініть пароль admin (/user set) та пароль Wi-Fi нижче.
 
-/system identity set name=rb4011
+/system identity set name={{IDENTITY}}
 
 # Міст і порти (ether1 = WAN)
 /interface bridge add name=bridge protocol-mode=rstp
@@ -53,18 +53,19 @@ add chain=forward action=drop connection-state=new connection-nat-state=!dstnat 
 /ip neighbor discovery-settings set discover-interface-list=LAN
 /tool mac-server set allowed-interface-list=LAN
 /tool mac-server mac-winbox set allowed-interface-list=LAN
-/user set admin password=""
+/user set admin password="{{ADMIN_PASSWORD}}"
 
 # Wi-Fi (CAPsMAN)
 # Коротка пауза, щоб пакет wifi повністю завантажився при запуску через run-after-reset
 :delay 5s
 /interface wifi datapath add name=dp-lan bridge=bridge
-/interface wifi security add name=sec-main authentication-types=wpa2-psk,wpa3-psk passphrase="" ft=yes ft-over-ds=yes
+/interface wifi security add name=sec-main authentication-types=wpa2-psk,wpa3-psk passphrase="{{WIFI_PASSWORD}}" ft=yes ft-over-ds=yes
 /interface wifi configuration
-add name=cfg-2g ssid="TP-Link_7D15" country=Ukraine security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
-add name=cfg-5g ssid="TP-Link_7D15-5g" country=Ukraine security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
+add name=cfg-2g ssid="{{SSID_2G}}" country="{{COUNTRY}}" security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
+add name=cfg-5g ssid="{{SSID_5G}}" country="{{COUNTRY}}" security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
 /interface wifi provisioning
-# Радіомодулі hAP ac3 працюють у 802.11ac (без ax): правило підходить лише радіо, яке підтримує всі вказані діапазони
+# Правила використовують лише діапазони n та ac: їх підтримують і hAP ac3 (без ax), і hAP ax3.
+# Правило підходить лише радіо, яке підтримує всі вказані діапазони, тому ax у списку не вказуємо.
 add action=create-dynamic-enabled supported-bands=2ghz-n master-configuration=cfg-2g
 add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=cfg-5g
 /interface wifi capsman set enabled=yes interfaces=bridge upgrade-policy=none

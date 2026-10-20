@@ -1,9 +1,9 @@
-# hAP ac3: CAP (точка доступу під керуванням CAPsMAN на RB4011)
-# Потрібно: RouterOS 7.24.5, увімкнений пакет wifi-qcom-ac (та сама версія, що й на RB4011).
+# {{IDENTITY}}: {{MODEL}}, CAP (точка доступу під керуванням CAPsMAN на RB4011)
+# Згенеровано generate.py зі шаблону templates/cap.rsc.tpl. Не редагуйте цей файл, змінюйте шаблон або .env.
+# Потрібно: RouterOS 7.24.5 (та сама версія, що й на RB4011), увімкнений пакет {{WIFI_PACKAGE}}.
 # Застосовувати лише на щойно скинутому роутері (скрипт не ідемпотентний), див. README.md.
-# ПЕРЕД ВИКОРИСТАННЯМ: змініть пароль admin і задайте унікальне ім'я для кожного пристрою (ac3-1, ac3-2, ...).
 
-/system identity set name=ac3-1
+/system identity set name={{IDENTITY}}
 
 # Міст: усі порти працюють як комутатор
 /interface bridge add name=bridge protocol-mode=rstp
@@ -28,7 +28,7 @@ add bridge=bridge interface=wifi2
 /ip neighbor discovery-settings set discover-interface-list=LAN
 /tool mac-server set allowed-interface-list=LAN
 /tool mac-server mac-winbox set allowed-interface-list=LAN
-/user set admin password=""
+/user set admin password="{{ADMIN_PASSWORD}}"
 
 # Підключення до CAPsMAN: радіо мають бути увімкнені й передані контролеру,
 # інакше вони лишаються вимкненими і контролер про них не знає
