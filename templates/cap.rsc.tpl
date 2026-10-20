@@ -2,6 +2,9 @@
 # Згенеровано generate.py зі шаблону templates/cap.rsc.tpl. Не редагуйте цей файл, змінюйте шаблон або .env.
 # Потрібно: RouterOS 7.24.5 (та сама версія, що й на RB4011), увімкнений пакет {{WIFI_PACKAGE}}.
 # Застосовувати лише на щойно скинутому роутері (скрипт не ідемпотентний), див. README.md.
+#
+# Як застосувати: завантажте цей файл у Files на роутері (WinBox: перетягнути), потім виконайте в терміналі:
+#   /system reset-configuration no-defaults=yes skip-backup=yes run-after-reset={{IDENTITY}}.rsc
 
 /system identity set name={{IDENTITY}}
 
