@@ -93,9 +93,14 @@ add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=c
 #@end
 /interface wifi capsman set enabled=yes interfaces=bridge upgrade-policy=none
 
-# Власне радіо RB4011 (wifi1, лише 5 ГГц) теж віддаємо під керування CAPsMAN, тож RB4011 є частиною мережі
-# і роздає ту саму мережу, що й точки доступу. Ці рядки в кінці файлу навмисно: якщо вони не виконаються,
-# решта конфігурації вже застосована.
-/interface wifi set wifi1 configuration.manager=capsman-or-local disabled=no
-# Як і на точках доступу, радіо під керуванням CAPsMAN не потрапляє в міст автоматично, тому додаємо його вручну
-/interface bridge port add bridge=bridge interface=wifi1
+# Власне радіо RB4011 (wifi1, лише 5 ГГц) теж роздає цю мережу, тож RB4011 є частиною мережі.
+# Воно налаштовується напряму тією самою конфігурацією, що й радіо точок доступу, без CAPsMAN:
+# режим capsman-or-local не підключав радіо до локального CAPsMAN, і воно лишалося без SSID.
+# Цей рядок стоїть у кінці файлу навмисно: якщо він не виконається, решта конфігурації вже застосована.
+# До моста радіо додається саме (datapath dp-lan має bridge=bridge).
+#@if separate
+/interface wifi set wifi1 configuration=cfg-5g configuration.manager=local disabled=no
+#@end
+#@if single
+/interface wifi set wifi1 configuration=cfg-main configuration.manager=local disabled=no
+#@end

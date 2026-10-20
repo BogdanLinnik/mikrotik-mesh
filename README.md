@@ -209,7 +209,7 @@ hAP ax3 працює на пакеті **`wifi-qcom`** (не `wifi-qcom-ac`), ц
 /interface wifi capsman remote-cap print    # кожна точка у списку, state Ok
 /interface wifi radio print                 # локальне радіо плюс два радіо на кожну точку
 /interface wifi print                       # wifi1 (власне радіо), cap-wifi1, cap-wifi2 ... без прапорця X
-/interface bridge port print                # wifi1 є портом моста на RB4011
+/interface bridge port print                # wifi1 є портом моста на RB4011 (може бути динамічним)
 /interface wifi registration-table print    # підключені Wi-Fi клієнти
 /ip service print                           # увімкнені лише ssh і winbox
 ```
@@ -235,12 +235,13 @@ hAP ax3 працює на пакеті **`wifi-qcom`** (не `wifi-qcom-ac`), ц
 | `cap-wifi1/2` з'явилися, але лишаються вимкненими (`X`) | Правила provisioning не підходять під діапазони радіо. Правило підходить лише радіо, яке підтримує всі вказані діапазони. Перевірте `/interface wifi radio print detail`: потрібні діапазони `2ghz-n` та `5ghz-ac`. Правила в шаблоні написані так, щоб підходити і ac3, і ax3, але на ax3 це не перевірялося. |
 | Клієнти підключаються до Wi-Fi, але не отримують DHCP-адресу / немає інтернету, а дротові клієнти працюють | Радіо точки не є портами моста. Перевірте `/interface bridge port print` на точці: `wifi1` і `wifi2` мають бути в списку (вже є в шаблоні). Якщо їх немає: `/interface bridge port add bridge=bridge interface=wifi1` і так само для `wifi2`. |
 | Старий пристрій (розумна розетка, лампа, принтер) не підключається до єдиної мережі | Часто це 2.4 ГГц пристрій, який не підтримує WPA3 або швидкий роумінг 802.11r. Згенеруйте окремі мережі: `python3 generate.py --show-separate`, і підключіть його до мережі 2.4 ГГц. |
-| Власне радіо RB4011 (`wifi1`) не роздає мережу або клієнти на ньому не отримують DHCP-адресу | Перевірте `/interface wifi print` (немає `X`, радіо під керуванням CAPsMAN) і `/interface bridge port print` (`wifi1` є портом моста). За потреби виконайте вручну: `/interface wifi set wifi1 configuration.manager=capsman-or-local disabled=no` і `/interface bridge port add bridge=bridge interface=wifi1`. Якщо радіо RB4011 не потрібне, ці рядки в кінці [шаблону](templates/rb4011.rsc.tpl) можна видалити. |
+| Власне радіо RB4011 (`wifi1`) не роздає мережу, у `/interface wifi print` написано "SSID not set" | Радіо не отримало конфігурацію. Виконайте: `/interface wifi set wifi1 configuration=cfg-main configuration.manager=local disabled=no` (з `--show-separate` замість `cfg-main` вкажіть `cfg-5g`). |
+| Клієнти підключаються до `wifi1` на RB4011, але не отримують DHCP-адресу | Перевірте `/interface bridge port print`: `wifi1` має бути портом моста (можливо динамічним). Якщо його немає: `/interface bridge port add bridge=bridge interface=wifi1`. Якщо радіо RB4011 не потрібне, рядок у кінці [шаблону](templates/rb4011.rsc.tpl) можна видалити. |
 | Точка не приєднується | Різні версії RouterOS, відсутній пакет Wi-Fi або точка не в тому самому мості/LAN, що й RB4011. |
 | На ax3 немає Wi-Fi інтерфейсів | Не встановлений або вимкнений пакет `wifi-qcom`, див. [Пакет Wi-Fi для hAP ax3](#пакет-wi-fi-для-hap-ax3). |
 
 ## Примітки
 
-- Власне радіо RB4011 (`wifi1`) теж входить у мережу: його віддано під керування локального CAPsMAN (`configuration.manager=capsman-or-local`), тож воно роздає ту саму мережу, що й точки доступу. Це радіо працює лише на 5 ГГц (діапазони `5ghz-a/n/ac`, Wi-Fi 5), мережі 2.4 ГГц від RB4011 немає. Ці рядки стоять у кінці [шаблону](templates/rb4011.rsc.tpl), і я не перевіряв їх на реальному пристрої.
+- Власне радіо RB4011 (`wifi1`) теж роздає мережу: воно налаштовується напряму тією самою конфігурацією (`cfg-main`, а з `--show-separate` це `cfg-5g`) у режимі `configuration.manager=local`, а не через CAPsMAN. Режим `capsman-or-local` не підключав радіо до власного CAPsMAN: у `/interface wifi print` було "no connection to CAPsMAN, managed locally; SSID not set". Це радіо працює лише на 5 ГГц (діапазони `5ghz-a/n/ac`, Wi-Fi 5), мережі 2.4 ГГц від RB4011 немає. Рядок стоїть у кінці [шаблону](templates/rb4011.rsc.tpl), і я не перевіряв його на реальному пристрої.
 - Файрвол: RB4011 приймає вхідний трафік лише з LAN і для встановлених з'єднань, нові з'єднання з WAN блокуються. Усі сервіси, окрім SSH і WinBox, вимкнені, а neighbor discovery і MAC-сервер обмежені LAN.
 - Шаблони містять українські коментарі. RouterOS ігнорує коментарі, але після першого скидання перевірте `/log print where topics~"error"`: якщо там помилка через символи, замініть коментарі в шаблонах на англійські.
