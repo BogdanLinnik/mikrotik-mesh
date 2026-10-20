@@ -2,6 +2,7 @@
 # Згенеровано generate.py зі шаблону templates/rb4011.rsc.tpl. Не редагуйте цей файл, змінюйте шаблон або .env.
 # Потрібно: RouterOS 7.24.5, увімкнений пакет wifi-qcom-ac. Підмережа 192.168.89.0/24
 # Застосовувати лише на щойно скинутому роутері (скрипт не ідемпотентний), див. README.md.
+# Wi-Fi: {{WIFI_MODE}}
 #
 # Як застосувати:
 #   1. Збережіть резервну копію поточної конфігурації (з паролями у відкритому вигляді) і завантажте її на комп'ютер
@@ -69,11 +70,24 @@ add chain=forward action=drop connection-state=new connection-nat-state=!dstnat 
 /interface wifi datapath add name=dp-lan bridge=bridge
 /interface wifi security add name=sec-main authentication-types=wpa2-psk,wpa3-psk passphrase="{{WIFI_PASSWORD}}" ft=yes ft-over-ds=yes
 /interface wifi configuration
+#@if separate
+# Окремі мережі: 2.4 ГГц і 5 ГГц мають різні SSID
 add name=cfg-2g ssid="{{SSID_2G}}" country="{{COUNTRY}}" security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
 add name=cfg-5g ssid="{{SSID_5G}}" country="{{COUNTRY}}" security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
+#@end
+#@if single
+# Одна мережа: обидва діапазони мають один SSID, клієнт сам обирає діапазон (steering.rrm/wnm лише підказують)
+add name=cfg-main ssid="{{SSID}}" country="{{COUNTRY}}" security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
+#@end
 /interface wifi provisioning
 # Правила використовують лише діапазони n та ac: їх підтримують і hAP ac3 (без ax), і hAP ax3.
 # Правило підходить лише радіо, яке підтримує всі вказані діапазони, тому ax у списку не вказуємо.
+#@if separate
 add action=create-dynamic-enabled supported-bands=2ghz-n master-configuration=cfg-2g
 add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=cfg-5g
+#@end
+#@if single
+add action=create-dynamic-enabled supported-bands=2ghz-n master-configuration=cfg-main
+add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=cfg-main
+#@end
 /interface wifi capsman set enabled=yes interfaces=bridge upgrade-policy=none
