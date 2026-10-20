@@ -8,7 +8,10 @@ Wi-Fi мережа за замовчуванням одна: обидва діа
 обирає діапазон. З параметром --show-separate генеруються дві окремі мережі: SSID для 2.4 ГГц і
 той самий SSID із суфіксом -5g для 5 ГГц.
 
-Використання: python3 generate.py [--show-separate [true|false]] [--env .env] [--out generated]
+Діапазон адрес, які видає DHCP на RB4011, задається параметром --lease-range (за замовчуванням 20-254,
+тобто 192.168.89.20-192.168.89.254).
+
+Використання: python3 generate.py [--show-separate [true|false]] [--lease-range ПОЧАТОК-КІНЕЦЬ] [--env .env] [--out generated]
 Залежностей немає, потрібен лише Python 3.
 """
 import argparse
@@ -19,6 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 TEMPLATES = ROOT / "templates"
 
+LAN_PREFIX = "192.168.89."  # підмережа LAN, роутер має адресу LAN_PREFIX + 1
+DEFAULT_LEASE_RANGE = "20-254"
 PLACEHOLDER_PASSWORDS = {"change-me", "change-me-too"}
 PLACEHOLDER_RE = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
 # Умовні блоки в шаблонах: "#@if separate" або "#@if single" ... "#@end". Це коментарі RouterOS,
@@ -84,7 +89,23 @@ def parse_bool(value):
     raise argparse.ArgumentTypeError("очікується true або false, зараз: %r" % value)
 
 
-def validate(env, show_separate):
+def parse_lease_range(value):
+    """Тип параметра --lease-range для argparse: "ПОЧАТОК-КІНЕЦЬ", де числа це останні октети адрес (2-254).
+
+    Повертає кортеж (початок, кінець). Адреса .1 належить роутеру, .0 і .255 — службові.
+    """
+    match = re.fullmatch(r"\s*(\d{1,3})\s*-\s*(\d{1,3})\s*", value)
+    if not match:
+        raise argparse.ArgumentTypeError("очікується формат ПОЧАТОК-КІНЕЦЬ, наприклад 20-254, зараз: %r" % value)
+    start, end = int(match.group(1)), int(match.group(2))
+    if not (2 <= start <= 254 and 2 <= end <= 254):
+        raise argparse.ArgumentTypeError("межі діапазону мають бути від 2 до 254 (.1 займає роутер), зараз: %d-%d" % (start, end))
+    if start > end:
+        raise argparse.ArgumentTypeError("початок діапазону (%d) більший за кінець (%d)" % (start, end))
+    return start, end
+
+
+def validate(env, show_separate, lease_range):
     """Перевіряє значення з .env і повертає налаштування для підстановки в шаблони."""
     errors = []
 
@@ -126,6 +147,8 @@ def validate(env, show_separate):
         "SSID_2G": routeros_escape(ssid),
         "SSID_5G": routeros_escape(ssid + "-5g"),
         "COUNTRY": routeros_escape(country),
+        "POOL_RANGE": "%s%d-%s%d" % (LAN_PREFIX, lease_range[0], LAN_PREFIX, lease_range[1]),
+        "LEASE_COUNT": lease_range[1] - lease_range[0] + 1,
         "SHOW_SEPARATE": show_separate,
         "WIFI_MODE": ("окремі мережі: 2.4 ГГц і 5 ГГц (-5g)" if show_separate
                       else "одна мережа, клієнт сам обирає діапазон"),
@@ -176,7 +199,7 @@ def render(template_name, values):
 def devices(config):
     """Повертає список (ім'я файлу, шаблон, параметри). Імена пристроїв унікальні в межах мережі."""
     common = {key: config[key] for key in (
-        "ADMIN_PASSWORD", "WIFI_PASSWORD", "SSID", "SSID_2G", "SSID_5G", "COUNTRY", "SHOW_SEPARATE", "WIFI_MODE")}
+        "ADMIN_PASSWORD", "WIFI_PASSWORD", "SSID", "SSID_2G", "SSID_5G", "COUNTRY", "POOL_RANGE", "SHOW_SEPARATE", "WIFI_MODE")}
     result = [("rb4011", "rb4011.rsc.tpl", dict(common, IDENTITY="rb4011"))]
     for index in range(1, config["AC3_COUNT"] + 1):
         identity = "ac3-%d" % index
@@ -192,12 +215,17 @@ def main():
     parser.add_argument("--show-separate", nargs="?", const=True, default=False, type=parse_bool, metavar="true|false",
                         help="створити окремі мережі для 2.4 і 5 ГГц (SSID і SSID-5g). Без параметра або з false "
                              "створюється одна мережа, клієнт сам обирає діапазон")
+    parser.add_argument("--lease-range", type=parse_lease_range, default=parse_lease_range(DEFAULT_LEASE_RANGE),
+                        metavar="ПОЧАТОК-КІНЕЦЬ",
+                        help="діапазон адрес для DHCP: останні октети, від 2 до 254 (за замовчуванням %s, тобто %s%s-%s%s)"
+                             % (DEFAULT_LEASE_RANGE, LAN_PREFIX, DEFAULT_LEASE_RANGE.split("-")[0],
+                                LAN_PREFIX, DEFAULT_LEASE_RANGE.split("-")[1]))
     parser.add_argument("--env", default=str(ROOT / ".env"), help="шлях до файлу .env (за замовчуванням .env біля скрипта)")
     parser.add_argument("--out", default=str(ROOT / "generated"), help="каталог для результату (за замовчуванням generated/)")
     args = parser.parse_args()
 
     try:
-        config = validate(load_env(Path(args.env)), args.show_separate)
+        config = validate(load_env(Path(args.env)), args.show_separate, args.lease_range)
         rendered = [(name, render(template, values)) for name, template, values in devices(config)]
     except ConfigError as error:
         print("Помилка:\n%s" % error, file=sys.stderr)
@@ -214,6 +242,7 @@ def main():
         path.chmod(0o600)  # у файлах паролі
         print("Створено %s" % path)
     print("Wi-Fi: %s" % config["WIFI_MODE"])
+    print("DHCP: %s (%d адрес)" % (config["POOL_RANGE"], config["LEASE_COUNT"]))
     return 0
 
 

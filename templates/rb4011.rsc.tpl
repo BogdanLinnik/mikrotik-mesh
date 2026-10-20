@@ -36,7 +36,8 @@ add bridge=bridge interface=sfp-sfpplus1
 
 # IP, DHCP, DNS
 /ip address add address=192.168.89.1/24 interface=bridge
-/ip pool add name=pool-lan ranges=192.168.89.100-192.168.89.254
+# Адреси LAN поза цим пулом (крім .1, його займає роутер) можна віддавати пристроям зі статичними адресами
+/ip pool add name=pool-lan ranges={{POOL_RANGE}}
 /ip dhcp-server add name=dhcp-lan interface=bridge address-pool=pool-lan lease-time=1h
 /ip dhcp-server network add address=192.168.89.0/24 gateway=192.168.89.1 dns-server=192.168.89.1
 /ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
