@@ -26,9 +26,6 @@ LAN_PREFIX = "192.168.89."  # підмережа LAN, роутер має адр
 DEFAULT_LEASE_RANGE = "20-254"
 PLACEHOLDER_PASSWORDS = {"change-me", "change-me-too"}
 PLACEHOLDER_RE = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
-# Умовні блоки в шаблонах: "#@if separate" або "#@if single" ... "#@end". Це коментарі RouterOS,
-# тому шаблон лишається коректним скриптом, а generate.py залишає лише потрібну гілку.
-CONDITIONAL_RE = re.compile(r"^\s*#@(?P<tag>if|end)(?:\s+(?P<name>\w+))?\s*$")
 
 
 class ConfigError(Exception):
@@ -143,13 +140,12 @@ def validate(env, show_separate, lease_range):
     return {
         "ADMIN_PASSWORD": routeros_escape(admin_password),
         "WIFI_PASSWORD": routeros_escape(wifi_password),
-        "SSID": routeros_escape(ssid),
         "SSID_2G": routeros_escape(ssid),
-        "SSID_5G": routeros_escape(ssid + "-5g"),
+        # В режимі однієї мережі SSID для 5 ГГц збігається з SSID для 2.4 ГГц
+        "SSID_5G": routeros_escape(ssid + "-5g" if show_separate else ssid),
         "COUNTRY": routeros_escape(country),
         "POOL_RANGE": "%s%d-%s%d" % (LAN_PREFIX, lease_range[0], LAN_PREFIX, lease_range[1]),
         "LEASE_COUNT": lease_range[1] - lease_range[0] + 1,
-        "SHOW_SEPARATE": show_separate,
         "WIFI_MODE": ("окремі мережі: 2.4 ГГц і 5 ГГц (-5g)" if show_separate
                       else "одна мережа, клієнт сам обирає діапазон"),
         "AC3_COUNT": ac3_count,
@@ -157,37 +153,8 @@ def validate(env, show_separate, lease_range):
     }
 
 
-def apply_conditionals(text, template_name, active):
-    """Залишає в тексті лише блоки "#@if <ім'я>" ... "#@end", ім'я яких є в множині active.
-
-    Рядки-маркери видаляються. Вкладені блоки не підтримуються.
-    """
-    result = []
-    current = None  # ім'я відкритого блока або None
-    keep = True
-    for number, line in enumerate(text.splitlines(keepends=True), 1):
-        match = CONDITIONAL_RE.match(line)
-        if not match:
-            if keep:
-                result.append(line)
-            continue
-        if match.group("tag") == "if":
-            if current is not None or not match.group("name"):
-                raise ConfigError("%s:%d: некоректний або вкладений #@if" % (template_name, number))
-            current = match.group("name")
-            keep = current in active
-        else:
-            if current is None:
-                raise ConfigError("%s:%d: #@end без відповідного #@if" % (template_name, number))
-            current, keep = None, True
-    if current is not None:
-        raise ConfigError("%s: блок #@if %s не закрито (#@end)" % (template_name, current))
-    return "".join(result)
-
-
 def render(template_name, values):
     text = (TEMPLATES / template_name).read_text(encoding="utf-8")
-    text = apply_conditionals(text, template_name, {"separate" if values["SHOW_SEPARATE"] else "single"})
     for key, value in values.items():
         text = text.replace("{{%s}}" % key, str(value))
     leftover = sorted(set(PLACEHOLDER_RE.findall(text)))
@@ -199,7 +166,7 @@ def render(template_name, values):
 def devices(config):
     """Повертає список (ім'я файлу, шаблон, параметри). Імена пристроїв унікальні в межах мережі."""
     common = {key: config[key] for key in (
-        "ADMIN_PASSWORD", "WIFI_PASSWORD", "SSID", "SSID_2G", "SSID_5G", "COUNTRY", "POOL_RANGE", "SHOW_SEPARATE", "WIFI_MODE")}
+        "ADMIN_PASSWORD", "WIFI_PASSWORD", "SSID_2G", "SSID_5G", "COUNTRY", "POOL_RANGE", "WIFI_MODE")}
     result = [("rb4011", "rb4011.rsc.tpl", dict(common, IDENTITY="rb4011"))]
     for index in range(1, config["AC3_COUNT"] + 1):
         identity = "ac3-%d" % index

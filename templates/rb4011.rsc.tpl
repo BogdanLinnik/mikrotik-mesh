@@ -70,27 +70,21 @@ add chain=forward action=drop connection-state=new connection-nat-state=!dstnat 
 :delay 5s
 /interface wifi datapath add name=dp-lan bridge=bridge
 /interface wifi security add name=sec-main authentication-types=wpa2-psk,wpa3-psk passphrase="{{WIFI_PASSWORD}}" ft=yes ft-over-ds=yes
+# Канал 5 ГГц без DFS-каналів: радіо не чекає 1-10 хвилин перевірки на радари після кожного запуску
+# і не змінює канал, коли виявляє радар. Каналів менше, зате мережа стабільна й з'являється одразу.
+# Ширину каналу й стандарт (band) не задаємо: за замовчуванням радіо саме обирає найкращі,
+# а band=5ghz-ac утримував би ax-радіо hAP ax3 на швидкостях Wi-Fi 5.
+/interface wifi channel
+add name=ch-5g skip-dfs-channels=all
 /interface wifi configuration
-#@if separate
-# Окремі мережі: 2.4 ГГц і 5 ГГц мають різні SSID
+# Режим мережі задає generate.py: SSID_5G дорівнює SSID_2G (одна мережа) або має суфікс -5g (окремі мережі)
 add name=cfg-2g ssid="{{SSID_2G}}" country="{{COUNTRY}}" security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
-add name=cfg-5g ssid="{{SSID_5G}}" country="{{COUNTRY}}" security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
-#@end
-#@if single
-# Одна мережа: обидва діапазони мають один SSID, клієнт сам обирає діапазон (steering.rrm/wnm лише підказують)
-add name=cfg-main ssid="{{SSID}}" country="{{COUNTRY}}" security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes
-#@end
+add name=cfg-5g ssid="{{SSID_5G}}" country="{{COUNTRY}}" security=sec-main datapath=dp-lan steering.rrm=yes steering.wnm=yes channel=ch-5g
 /interface wifi provisioning
 # Правила використовують лише діапазони n та ac: їх підтримують і hAP ac3 (без ax), і hAP ax3.
 # Правило підходить лише радіо, яке підтримує всі вказані діапазони, тому ax у списку не вказуємо.
-#@if separate
 add action=create-dynamic-enabled supported-bands=2ghz-n master-configuration=cfg-2g
 add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=cfg-5g
-#@end
-#@if single
-add action=create-dynamic-enabled supported-bands=2ghz-n master-configuration=cfg-main
-add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=cfg-main
-#@end
 /interface wifi capsman set enabled=yes interfaces=bridge upgrade-policy=none
 
 # Власне радіо RB4011 (wifi1, лише 5 ГГц) теж роздає цю мережу, тож RB4011 є частиною мережі.
@@ -98,9 +92,4 @@ add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=c
 # режим capsman-or-local не підключав радіо до локального CAPsMAN, і воно лишалося без SSID.
 # Цей рядок стоїть у кінці файлу навмисно: якщо він не виконається, решта конфігурації вже застосована.
 # До моста радіо додається саме (datapath dp-lan має bridge=bridge).
-#@if separate
 /interface wifi set wifi1 configuration=cfg-5g configuration.manager=local disabled=no
-#@end
-#@if single
-/interface wifi set wifi1 configuration=cfg-main configuration.manager=local disabled=no
-#@end
