@@ -59,7 +59,7 @@ Wi-Fi mesh із дротовим підключенням точок досту�
 | [randomize.py](randomize.py) | Записує в `.env` випадковий пароль Wi-Fi і випадковий суфікс SSID (4 шістнадцяткові символи); з `--admin-password` ще й пароль admin, з `--password-length` задається довжина паролів. |
 | [traffic.py](traffic.py) | Показує, які пристрої до якої точки доступу підключені, і навантаження (TX/RX) кожного. Читає дані RB4011 по SSH (лише команди `print`). |
 | [live.py](live.py) | Живий топ-10 Wi-Fi клієнтів за навантаженням: те саме, що `traffic.py --max-only`, але таблиця оновлюється на місці кожні кілька секунд. |
-| [routeros/](routeros/) | Ті самі звіти як скрипти RouterOS, які виконуються безпосередньо на RB4011 без комп'ютера: `mesh-traffic.rsc`, `mesh-traffic-max.rsc`, `mesh-live.rsc`. |
+| [routeros/](routeros/) | Ті самі звіти як скрипти RouterOS, які виконуються безпосередньо на RB4011 без комп'ютера: `mesh-traffic.rsc`, `mesh-traffic-max.rsc`, `mesh-live.rsc`, `mesh-client.rsc`. Коротка інструкція: [mesh-scripts-instruction.docx](routeros/mesh-scripts-instruction.docx). |
 | [templates/rb4011.rsc.tpl](templates/rb4011.rsc.tpl) | Шаблон для RB4011: роутер, DHCP/DNS, NAT, файрвол, контролер CAPsMAN. |
 | [templates/cap.rsc.tpl](templates/cap.rsc.tpl) | Спільний шаблон для hAP ac3 і hAP ax3: міст-комутатор і радіо під керуванням RB4011. |
 | `generated/` | Результат генерації. Не редагуйте вручну й не публікуйте: файли містять паролі (каталог у `.gitignore`). |
@@ -289,6 +289,7 @@ python3 live.py --client-mac AA:BB:CC:DD:EE:FF   # лише один клієн�
 | [routeros/mesh-traffic.rsc](routeros/mesh-traffic.rsc) | `$meshTraffic` | `traffic.py` |
 | [routeros/mesh-traffic-max.rsc](routeros/mesh-traffic-max.rsc) | `$meshTrafficMax` | `traffic.py --max-only` (тут це поведінка за замовчуванням) |
 | [routeros/mesh-live.rsc](routeros/mesh-live.rsc) | `$meshLive` | `live.py` |
+| [routeros/mesh-client.rsc](routeros/mesh-client.rsc) | `$meshClient` | немає: миттєвий зріз без вимірювання (точка, сигнал, TX/RX зараз) |
 
 **Як користуватися.** Завантажте потрібний файл на роутер (WinBox: Files, перетягнути) і виконайте в терміналі:
 
@@ -299,7 +300,7 @@ $meshTrafficMax duration=60 source=ax3-1
 $meshTrafficMax clientMac=AA:BB:CC:DD:EE:FF
 ```
 
-Імпорт лише визначає функцію, яку потім викликають з параметрами. Після перезавантаження роутера глобальні функції зникають, тому файл імпортують знову. Щоб не завантажувати файл повторно, збережіть його як скрипт: `/system script add name=mesh-traffic-max source=[/file get mesh-traffic-max.rsc contents]`, і після перезавантаження достатньо `/system script run mesh-traffic-max`.
+Імпорт (і `/system script run`) лише визначає функцію, яку потім викликають з параметрами. Після перезавантаження роутера глобальні функції зникають, тому файл імпортують знову. Щоб не завантажувати файл повторно, збережіть його як скрипт: `/system script add name=mesh-traffic-max source=[/file get mesh-traffic-max.rsc contents]`, і після перезавантаження достатньо `/system script run mesh-traffic-max`.
 
 **Параметри** (усі необов'язкові; імена без дефісів, бо їх не допускає RouterOS):
 
@@ -308,7 +309,7 @@ $meshTrafficMax clientMac=AA:BB:CC:DD:EE:FF
 | `duration` | `$meshTraffic`, `$meshTrafficMax` | Тривалість вимірювання, 1-300 с (за замовчуванням 30). |
 | `showZeros` | `$meshTraffic` | `yes` показує й клієнтів з TX і RX 0bps (за замовчуванням вони приховані). |
 | `source` | `$meshTrafficMax`, `$meshLive` | Лише клієнти однієї точки: `rb4011`, `ac3-1`, `ax3-2` тощо. |
-| `clientMac` | усі три | Лише клієнт з цією MAC-адресою. |
+| `clientMac` | усі чотири | Лише клієнт з цією MAC-адресою. |
 | `interval` | `$meshLive` | Пауза між оновленнями, 2-60 с (за замовчуванням 5). |
 | `top` | `$meshLive` | Скільки клієнтів показувати (за замовчуванням 10). |
 | `count` | `$meshLive` | Зупинитися після стількох оновлень (0 = до Ctrl+C). |
