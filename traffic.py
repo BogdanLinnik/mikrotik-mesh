@@ -16,6 +16,7 @@ TX: від точки до пристрою (завантаження на пр�
     python3 traffic.py [--host 192.168.89.1] [--user admin] [--duration 30]
     python3 traffic.py --show-zeros         # показати й клієнтів без трафіку (за замовчуванням вони приховані)
     python3 traffic.py --max-only           # одна таблиця: 10 найактивніших клієнтів за TX, точка в окремій колонці
+    python3 traffic.py --max-only --source ax3-1   # те саме, але лише клієнти однієї точки
     python3 traffic.py --raw sample.txt     # зберегти сирий вивід роутера у файл
     python3 traffic.py --input sample.txt   # не підключатися до роутера, а розібрати збережений вивід
 
@@ -253,11 +254,22 @@ def print_table(header, rows, indent, left_columns):
         print(indent + "  ".join(cells))
 
 
-def print_max_only(aps, duration, limit=10):
-    clients = [(ap["name"], c) for ap in aps for c in ap["wifi"]]
+def select_source(aps, source):
+    """Повертає точну назву точки за введеною (без урахування регістру) або завершує роботу з переліком доступних."""
+    names = [ap["name"] for ap in aps]
+    for name in names:
+        if name.lower() == source.strip().lower():
+            return name
+    raise SystemExit("Точку %r не знайдено. Доступні: %s" % (source, ", ".join(names)))
+
+
+def print_max_only(aps, duration, limit=10, source=None):
+    if source:
+        source = select_source(aps, source)
+    clients = [(ap["name"], c) for ap in aps for c in ap["wifi"] if not source or ap["name"] == source]
     clients.sort(key=lambda item: item[1]["tx"] or 0, reverse=True)
-    print("Навантаження за %d с, топ-%d клієнтів за TX. TX: до пристрою (завантаження), RX: від пристрою (вивантаження).\n"
-          % (duration, limit))
+    print("Навантаження за %d с, топ-%d клієнтів за TX%s. TX: до пристрою (завантаження), RX: від пристрою (вивантаження).\n"
+          % (duration, limit, " на точці " + source if source else ""))
     rows = [(c["name"], c["ip"], ap_name, c["band"], c["signal"], format_rate(c["tx"]), format_rate(c["rx"]))
             for ap_name, c in clients[:limit]]
     print_table(("Пристрій", "IP", "Точка", "Діапазон", "Сигнал", "TX", "RX"), rows, "", 5)
@@ -295,12 +307,16 @@ def main():
     parser.add_argument("--show-zeros", action="store_true", help="показувати й клієнтів, у яких TX і RX дорівнюють 0bps")
     parser.add_argument("--max-only", action="store_true",
                         help="одна таблиця з 10 клієнтами з найбільшим TX, точка доступу в окремій колонці")
+    parser.add_argument("--source", metavar="ТОЧКА",
+                        help="з --max-only: лише клієнти цієї точки (rb4011, ac3-1, ax3-2, ...)")
     parser.add_argument("--raw", metavar="ФАЙЛ", help="зберегти сирий вивід роутера у файл")
     parser.add_argument("--input", metavar="ФАЙЛ", help="не підключатися до роутера, а розібрати збережений вивід")
     args = parser.parse_args()
 
     if args.duration < 1 or args.duration > 300:
         parser.error("--duration має бути від 1 до 300 секунд")
+    if args.source and not args.max_only:
+        parser.error("--source працює лише разом з --max-only")
 
     if args.input:
         with open(args.input, encoding="utf-8", errors="replace") as handle:
@@ -315,7 +331,7 @@ def main():
 
     aps = analyze(text, args.duration)
     if args.max_only:
-        print_max_only(aps, args.duration)
+        print_max_only(aps, args.duration, source=args.source)
     else:
         print_report(aps, args.duration, args.host, args.show_zeros)
     return 0
