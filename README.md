@@ -59,7 +59,7 @@ Wi-Fi mesh із дротовим підключенням точок досту�
 | [randomize.py](randomize.py) | Записує в `.env` випадковий пароль Wi-Fi і випадковий суфікс SSID (4 шістнадцяткові символи); з `--admin-password` ще й пароль admin, з `--password-length` задається довжина паролів. |
 | [traffic.py](traffic.py) | Показує, які пристрої до якої точки доступу підключені, і навантаження (TX/RX) кожного. Читає дані RB4011 по SSH (лише команди `print`). |
 | [live.py](live.py) | Живий топ-10 Wi-Fi клієнтів за навантаженням: те саме, що `traffic.py --max-only`, але таблиця оновлюється на місці кожні кілька секунд. |
-| [routeros/](routeros/) | Ті самі звіти як скрипти RouterOS, які виконуються безпосередньо на RB4011 без комп'ютера: `mesh-traffic.rsc`, `mesh-traffic-max.rsc`, `mesh-live.rsc`, `mesh-client.rsc`. Коротка інструкція: [mesh-scripts-instruction.docx](routeros/mesh-scripts-instruction.docx). |
+| [routeros/](routeros/) | Ті самі звіти як скрипти RouterOS, які виконуються безпосередньо на RB4011 без комп'ютера: `mesh-traffic.rsc`, `mesh-traffic-max.rsc`, `mesh-live.rsc`, `mesh-client.rsc`, `mesh-rejected.rsc`. Коротка інструкція: [mesh-scripts-instruction.docx](routeros/mesh-scripts-instruction.docx). |
 | [templates/rb4011.rsc.tpl](templates/rb4011.rsc.tpl) | Шаблон для RB4011: роутер, DHCP/DNS, NAT, файрвол, контролер CAPsMAN. |
 | [templates/cap.rsc.tpl](templates/cap.rsc.tpl) | Спільний шаблон для hAP ac3 і hAP ax3: міст-комутатор і радіо під керуванням RB4011. |
 | `generated/` | Результат генерації. Не редагуйте вручну й не публікуйте: файли містять паролі (каталог у `.gitignore`). |
@@ -290,6 +290,7 @@ python3 live.py --client-mac AA:BB:CC:DD:EE:FF   # лише один клієн�
 | [routeros/mesh-traffic-max.rsc](routeros/mesh-traffic-max.rsc) | `$meshTrafficMax` | `traffic.py --max-only` (тут це поведінка за замовчуванням) |
 | [routeros/mesh-live.rsc](routeros/mesh-live.rsc) | `$meshLive` | `live.py` |
 | [routeros/mesh-client.rsc](routeros/mesh-client.rsc) | `$meshClient` | немає: миттєвий зріз без вимірювання (точка, сигнал, TX/RX зараз) |
+| [routeros/mesh-rejected.rsc](routeros/mesh-rejected.rsc) | `$meshRejected` | немає: пристрої, відключені через access-list (час, MAC, ім'я, точка, сигнал) з логу роутера; з `all=yes` додається колонка причини. Параметри: `last`, `all=yes`, `clientMac`. Обмеження описані на початку файлу: у логу немає причини `min-signal`, лише `access-list changed`. |
 
 **Як користуватися.** Завантажте потрібний файл на роутер (WinBox: Files, перетягнути) і виконайте в терміналі:
 
