@@ -10,3 +10,5 @@ backups/
 # Кеш Python
 __pycache__/
 .DS_Store
+sample.txt 
+.vscode/

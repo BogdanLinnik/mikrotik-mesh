@@ -85,6 +85,10 @@ add name=cfg-5g ssid="{{SSID_5G}}" country="{{COUNTRY}}" security=sec-main datap
 # Правило підходить лише радіо, яке підтримує всі вказані діапазони, тому ax у списку не вказуємо.
 add action=create-dynamic-enabled supported-bands=2ghz-n master-configuration=cfg-2g
 add action=create-dynamic-enabled supported-bands=5ghz-ac master-configuration=cfg-5g
+/interface wifi access-list
+# Клієнти зі слабким сигналом відхиляються, щоб шукали сильнішу точку (поріг MIN_SIGNAL у .env). Діє і на радіо точок, і на wifi1.
+# Скасувати на працюючому роутері: /interface wifi access-list remove [find comment="min-signal"]
+{{MIN_SIGNAL_RULE}}
 /interface wifi capsman set enabled=yes interfaces=bridge upgrade-policy=none
 
 # Власне радіо RB4011 (wifi1, лише 5 ГГц) теж роздає цю мережу, тож RB4011 є частиною мережі.
