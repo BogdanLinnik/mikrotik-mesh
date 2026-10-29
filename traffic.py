@@ -1,191 +1,319 @@
 #!/usr/bin/env python3
-"""Підсумок навантаження на мережу по пристроях на основі /tool torch на роутері.
+"""Показує, який пристрій до якої точки доступу підключений і яке навантаження він створює.
 
-Скрипт запускає на RB4011 по SSH команду
-    /tool torch interface=bridge src-address=0.0.0.0/0 dst-address=0.0.0.0/0 ip-protocol=any duration=10s
-розбирає її вивід (Torch оновлює таблицю щосекунди), групує потоки за IP-PROTOCOL і SRC-ADDRESS
-і підсумовує TX та RX. Результат: середня швидкість за час вимірювання, найбільші зверху.
+Скрипт підключається до RB4011 по SSH і за один сеанс виконує лише команди читання (print):
+  - /interface wifi registration-table: усі Wi-Fi клієнти (і RB4011, і точок під CAPsMAN) з лічильниками байтів;
+  - /interface print stats-detail: лічильники портів RB4011, в які увімкнені точки доступу, і коментарі
+    "operated by CAP <MAC>", які пов'язують радіо cap-wifiN з точкою;
+  - /interface wifi capsman remote-cap, /interface bridge host, /ip dhcp-server lease: імена точок, їхні порти й IP клієнтів.
+Лічильники знімаються двічі з паузою між зрізами, швидкість це різниця байтів поділена на час.
 
-Torch показує швидкості в бітах за секунду. За документацією MikroTik SRC-ADDRESS це "далекий" від
-інтерфейсу бік потоку, RX це швидкість від нього, а TX швидкість до нього. Для моста з пристроями
-LAN це означає: TX це завантаження на пристрій, RX це вивантаження з пристрою.
+TX: від точки до пристрою (завантаження на пристрій), RX: від пристрою до точки (вивантаження з пристрою).
+Для дротових пристроїв за точкою доступу окремих лічильників немає: їхнє навантаження входить у рядок
+"порт" точки (трафік порту RB4011 до точки), де також видно сумарний Wi-Fi трафік.
 
 Використання:
-    python3 traffic.py [--host 192.168.89.1] [--user admin] [--duration 10] [--top 20]
-    python3 traffic.py --raw sample.txt     # зберегти сирий вивід Torch у файл (для перевірки розбору)
+    python3 traffic.py [--host 192.168.89.1] [--user admin] [--duration 30]
+    python3 traffic.py --show-zeros         # показати й клієнтів без трафіку (за замовчуванням вони приховані)
+    python3 traffic.py --max-only           # одна таблиця: 10 найактивніших клієнтів за TX, точка в окремій колонці
+    python3 traffic.py --raw sample.txt     # зберегти сирий вивід роутера у файл
     python3 traffic.py --input sample.txt   # не підключатися до роутера, а розібрати збережений вивід
 
-Пароль SSH запитує сам ssh. Щоб не вводити його щоразу, додайте на роутер ключ SSH.
-Залежностей немає, потрібен лише Python 3 і ssh.
+Пароль SSH запитує сам ssh. Залежностей немає, потрібен лише Python 3 і ssh.
 """
 import argparse
-import ipaddress
 import re
 import subprocess
 import sys
-from collections import Counter, defaultdict
 
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-B0-2]|\r")
-RATE_RE = re.compile(r"^(\d+(?:\.\d+)?)(bps|kbps|Mbps|Gbps)$", re.IGNORECASE)
-RATE_UNITS = {"bps": 1, "kbps": 1e3, "mbps": 1e6, "gbps": 1e9}
-INTERFACE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+KV_RE = re.compile(r'([\w.-]+)=("(?:[^"\\]|\\.)*"|\S*)')
+RECORD_START_RE = re.compile(r"^\s{0,3}\d+\s")
+SECTION_RE = re.compile(r"^###(\w+)$")
+CAP_COMMENT_RE = re.compile(r";;; operated by CAP ([0-9A-Fa-f:]{17})")
+INTERFACE_BYTES_RE = re.compile(r"rx-byte=([\d ]+?)\s+tx-byte=([\d ]+?)\s+rx-packet")
+ROUTER_NAME = "rb4011"
 
 
-def parse_rate(token):
-    """Повертає швидкість у бітах за секунду або None, якщо токен не є швидкістю (2.0Mbps, 340kbps, 0bps)."""
-    match = RATE_RE.match(token)
-    if not match:
+def build_command(duration):
+    """Одна команда RouterOS: перший зріз, пауза, другий зріз. Усі print-команди лише читають."""
+    registration = "/interface wifi registration-table print stats without-paging"
+    interfaces = "/interface print stats-detail without-paging"
+    return (
+        ':put "###static_caps"; /interface wifi capsman remote-cap print terse without-paging; '
+        ':put "###static_hosts"; /interface bridge host print terse without-paging where !local; '
+        ':put "###static_leases"; /ip dhcp-server lease print terse without-paging; '
+        ':put "###reg1"; %s; :put "###if1"; %s; '
+        ":delay %ds; "
+        ':put "###reg2"; %s; :put "###if2"; %s; :put "###end"'
+    ) % (registration, interfaces, duration, registration, interfaces)
+
+
+def run_router(host, user, duration):
+    command = build_command(duration)
+    ssh = ["ssh", "-o", "ConnectTimeout=10", "%s@%s" % (user, host), command]
+    try:
+        # stdin і stderr лишаються підключеними до термінала, щоб ssh міг запитати пароль
+        completed = subprocess.run(ssh, stdout=subprocess.PIPE, universal_newlines=True, timeout=duration + 60)
+    except FileNotFoundError:
+        raise SystemExit("Не знайдено команду ssh. Встановіть клієнт OpenSSH.")
+    except subprocess.TimeoutExpired:
+        raise SystemExit("Роутер не відповів вчасно. Спробуйте ще раз.")
+    if completed.returncode != 0 and not completed.stdout.strip():
+        raise SystemExit("ssh завершився з кодом %d, виводу немає." % completed.returncode)
+    return completed.stdout
+
+
+def split_sections(text):
+    sections = {}
+    current = None
+    for line in text.replace("\r", "").split("\n"):
+        match = SECTION_RE.match(line.strip())
+        if match:
+            current = match.group(1)
+            sections[current] = []
+        elif current is not None:
+            sections[current].append(line)
+    return sections
+
+
+def unescape(value):
+    """RouterOS записує не-ASCII символи в лапках як \\XX (байти UTF-8 у hex): "\\D0\\97\\D0\\B0\\D0\\BB" це "Зал"."""
+    if "\\" not in value:
+        return value
+    raw = re.sub(r"\\([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), value)
+    try:
+        return raw.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+
+
+def parse_fields(text):
+    fields = {}
+    for key, value in KV_RE.findall(text):
+        fields[key] = unescape(value[1:-1]) if value.startswith('"') else value
+    return fields
+
+
+def parse_records(lines):
+    """Розбирає вивід print (detail/stats): запис починається з рядка з номером, продовження мають відступ."""
+    records = []
+    for line in lines:
+        if RECORD_START_RE.match(line):
+            records.append(line.strip())
+        elif records and line.strip():
+            records[-1] += " " + line.strip()
+    return records
+
+
+def parse_terse(lines):
+    return [parse_fields(record) for record in parse_records(lines)]
+
+
+def parse_registration(lines):
+    """Повертає {mac: {interface, signal, band, tx_bytes, rx_bytes}}."""
+    clients = {}
+    for record in parse_records(lines):
+        fields = parse_fields(record)
+        mac = fields.get("mac-address", "").upper()
+        if not mac:
+            continue
+        tx_bytes = rx_bytes = 0
+        if "bytes" in fields and "," in fields["bytes"]:
+            tx_text, rx_text = fields["bytes"].split(",", 1)
+            tx_bytes, rx_bytes = int(tx_text), int(rx_text)
+        clients[mac] = {
+            "interface": fields.get("interface", ""),
+            "signal": fields.get("signal", ""),
+            "band": fields.get("band", ""),
+            "tx_bytes": tx_bytes,
+            "rx_bytes": rx_bytes,
+        }
+    return clients
+
+
+def parse_interfaces(lines):
+    """Повертає ({назва інтерфейсу: (rx_byte, tx_byte)}, {cap-wifiN: MAC точки})."""
+    counters = {}
+    cap_of_radio = {}
+    for record in parse_records(lines):
+        fields = parse_fields(record)
+        name = fields.get("name")
+        if not name:
+            continue
+        match = INTERFACE_BYTES_RE.search(record)
+        if match:
+            counters[name] = (int(match.group(1).replace(" ", "")), int(match.group(2).replace(" ", "")))
+        cap_match = CAP_COMMENT_RE.search(record)
+        if cap_match:
+            cap_of_radio[name] = cap_match.group(1).upper()
+    return counters, cap_of_radio
+
+
+def rate(before, after, seconds):
+    """Біти за секунду; None, якщо лічильник скинувся (клієнт перепідключився)."""
+    if after < before:
         return None
-    return float(match.group(1)) * RATE_UNITS[match.group(2).lower()]
+    return (after - before) * 8 / seconds
 
 
 def format_rate(bps):
+    if bps is None:
+        return "-"
     for unit, divisor in (("Gbps", 1e9), ("Mbps", 1e6), ("kbps", 1e3)):
         if bps >= divisor:
             return "%.1f%s" % (bps / divisor, unit)
     return "%.0fbps" % bps
 
 
-def parse_line(line):
-    """Розбирає один рядок Torch. Повертає (ключ потоку, ip-protocol, src, tx, rx) або None.
+def analyze(text, duration):
+    """Повертає список точок: {name, ip, port, port_tx, port_rx, wifi: [...], wired: [...]}."""
+    sections = split_sections(text)
+    if "reg2" not in sections or "if2" not in sections:
+        raise SystemExit("У виводі роутера немає другого зрізу лічильників (вивід обірвано?).")
 
-    Приклад рядка: "ip udp 0 192.168.88.20 2257 192.168.88.1 2001 (glimpse) 2.0Mbps 0bps 172 0".
-    Колонки визначаються не за позицією, а за виглядом токенів: перші дві адреси IPv4 це SRC і DST,
-    перші дві швидкості це TX і RX, а IP-PROTOCOL це другий токен після MAC-PROTOCOL "ip".
-    """
-    tokens = line.split()
-    if len(tokens) < 6 or tokens[0].lower() != "ip":
-        return None
-    addresses = []
-    rates = []
-    for token in tokens[2:]:
-        try:
-            addresses.append(str(ipaddress.IPv4Address(token)))
+    caps = parse_terse(sections.get("static_caps", []))
+    hosts = parse_terse(sections.get("static_hosts", []))
+    leases = parse_terse(sections.get("static_leases", []))
+    registration1 = parse_registration(sections.get("reg1", []))
+    registration2 = parse_registration(sections.get("reg2", []))
+    interfaces1, _ = parse_interfaces(sections.get("if1", []))
+    interfaces2, cap_of_radio = parse_interfaces(sections.get("if2", []))
+
+    lease_of_mac = {lease["mac-address"].upper(): lease for lease in leases if "mac-address" in lease}
+    port_of_mac = {host["mac-address"].upper(): host.get("on-interface", "") for host in hosts if "mac-address" in host}
+
+    aps = {}
+    aps[ROUTER_NAME] = {"name": ROUTER_NAME, "mac": None, "port": None, "wifi": [], "wired": []}
+    for cap in caps:
+        mac = cap.get("base-mac", "").upper()
+        aps[mac] = {"name": cap.get("identity", mac), "mac": mac, "port": port_of_mac.get(mac), "wifi": [], "wired": []}
+    for key, ap in aps.items():
+        lease = lease_of_mac.get(ap["mac"]) if ap["mac"] else None
+        ap["ip"] = lease["address"] if lease else None
+        port = ap["port"]
+        if port and port in interfaces1 and port in interfaces2:
+            ap["port_tx"] = rate(interfaces1[port][1], interfaces2[port][1], duration)
+            ap["port_rx"] = rate(interfaces1[port][0], interfaces2[port][0], duration)
+        else:
+            ap["port_tx"] = ap["port_rx"] = None
+
+    def describe(mac):
+        lease = lease_of_mac.get(mac)
+        return (lease.get("host-name") or mac) if lease else mac, (lease["address"] if lease else "")
+
+    ap_macs = {ap["mac"] for ap in aps.values() if ap["mac"]}
+    port_to_ap = {ap["port"]: ap for ap in aps.values() if ap["port"]}
+
+    for mac, client in registration2.items():
+        if mac in ap_macs:
             continue
-        except ValueError:
-            pass
-        rate = parse_rate(token)
-        if rate is not None:
-            rates.append((token, rate))
-    if len(addresses) < 2 or len(rates) < 2:
-        return None
-    # Ключ потоку: усе до першої швидкості, щоб відрізнити однакові потоки в різних кадрах таблиці
-    first_rate_token = rates[0][0]
-    key = tuple(tokens[: tokens.index(first_rate_token, 2)])
-    return key, tokens[1].lower(), addresses[0], rates[0][1], rates[1][1]
+        radio = client["interface"]
+        ap = aps[cap_of_radio[radio]] if radio in cap_of_radio and cap_of_radio[radio] in aps else None
+        if ap is None and radio in cap_of_radio:
+            continue  # радіо належить точці, яку CAPsMAN вже не знає
+        if ap is None:
+            ap = aps[ROUTER_NAME]
+        before = registration1.get(mac)
+        tx = rx = None
+        if before:
+            tx = rate(before["tx_bytes"], client["tx_bytes"], duration)
+            rx = rate(before["rx_bytes"], client["rx_bytes"], duration)
+        name, ip = describe(mac)
+        ap["wifi"].append({"name": name, "ip": ip, "mac": mac, "band": client["band"], "signal": client["signal"],
+                           "tx": tx, "rx": rx})
 
-
-def summarize(text, subnet=None):
-    """Групує рядки за (IP-PROTOCOL, SRC-ADDRESS) і усереднює TX та RX за кадри таблиці.
-
-    Torch друкує повну таблицю щосекунди, тому потік зустрічається один раз на кадр. Кількість кадрів
-    оцінюється як найбільша кількість появ одного потоку. Потік, якого в кадрі немає, рахується як нуль.
-    Повертає (список (протокол, адреса, tx, rx), кількість кадрів, кількість розібраних рядків).
-    """
-    rows = []
-    for raw_line in ANSI_RE.sub("\n", text).split("\n"):
-        parsed = parse_line(raw_line)
-        if parsed:
-            rows.append(parsed)
-    if not rows:
-        return [], 0, 0
-
-    frames = max(Counter(key for key, *_ in rows).values())
-    totals = defaultdict(lambda: [0.0, 0.0])
-    for _, protocol, src, tx, rx in rows:
-        if subnet is not None and ipaddress.IPv4Address(src) not in subnet:
+    # Дротові: хости на порті точки, яких немає серед Wi-Fi клієнтів і які не є самими точками
+    for mac, port in port_of_mac.items():
+        if mac in registration2 or mac in ap_macs or port not in port_to_ap:
             continue
-        totals[(protocol, src)][0] += tx
-        totals[(protocol, src)][1] += rx
-    result = [(protocol, src, tx / frames, rx / frames) for (protocol, src), (tx, rx) in totals.items()]
-    result.sort(key=lambda item: item[2] + item[3], reverse=True)
-    return result, frames, len(rows)
+        name, ip = describe(mac)
+        port_to_ap[port]["wired"].append({"name": name, "ip": ip, "mac": mac})
+
+    result = list(aps.values())
+    for ap in result:
+        ap["wifi"].sort(key=lambda c: (c["tx"] or 0) + (c["rx"] or 0), reverse=True)
+    return result
 
 
-def run_torch(host, user, interface, duration, tty):
-    if not INTERFACE_RE.match(interface):
-        raise SystemExit("Некоректна назва інтерфейсу: %r" % interface)
-    command = ("/tool torch interface=%s src-address=0.0.0.0/0 dst-address=0.0.0.0/0 ip-protocol=any duration=%ds"
-               % (interface, duration))
-    ssh = ["ssh", "-o", "ConnectTimeout=10"] + (["-tt"] if tty else []) + ["%s@%s" % (user, host), command]
-    try:
-        # stderr і stdin лишаються підключеними до термінала, щоб ssh міг запитати пароль
-        completed = subprocess.run(ssh, stdout=subprocess.PIPE, universal_newlines=True, timeout=duration + 60)
-    except FileNotFoundError:
-        raise SystemExit("Не знайдено команду ssh. Встановіть клієнт OpenSSH.")
-    except subprocess.TimeoutExpired:
-        raise SystemExit("Роутер не завершив Torch вчасно. Спробуйте ще раз або з --tty.")
-    if completed.returncode != 0 and not completed.stdout.strip():
-        raise SystemExit("ssh завершився з кодом %d, виводу немає." % completed.returncode)
-    return completed.stdout
+def is_idle(client):
+    """Клієнт без трафіку: TX і RX округлюються до 0bps (або швидкість невідома)."""
+    return round(client["tx"] or 0) == 0 and round(client["rx"] or 0) == 0
 
 
-def print_table(result, frames, top):
-    shown = result[:top]
-    header = ("IP-PROTOCOL", "SRC-ADDRESS", "TX", "RX")
-    lines = [(protocol, src, format_rate(tx), format_rate(rx)) for protocol, src, tx, rx in shown]
-    widths = [max(len(row[i]) for row in [header] + lines) for i in range(4)]
+def print_table(header, rows, indent, left_columns):
+    """Друкує таблицю: перші left_columns колонок вирівняні вліво, решта вправо."""
+    widths = [max(len(str(row[i])) for row in [header] + rows) for i in range(len(header))]
+    for row in [header] + rows:
+        cells = [str(row[i]).ljust(widths[i]) if i < left_columns else str(row[i]).rjust(widths[i])
+                 for i in range(len(header))]
+        print(indent + "  ".join(cells))
 
-    def line(row):
-        return "%s  %s  %s  %s" % (row[0].ljust(widths[0]), row[1].ljust(widths[1]),
-                                   row[2].rjust(widths[2]), row[3].rjust(widths[3]))
 
-    print(line(header))
-    for row in lines:
-        print(line(row))
-    total_tx = sum(item[2] for item in result)
-    total_rx = sum(item[3] for item in result)
-    hidden = len(result) - len(shown)
-    print()
-    print("Усього: TX %s, RX %s (середнє за %d кадрів Torch%s)"
-          % (format_rate(total_tx), format_rate(total_rx), frames, ", ще %d рядків приховано" % hidden if hidden > 0 else ""))
-    print("TX: до пристрою (завантаження), RX: від пристрою (вивантаження). Швидкості в бітах за секунду.")
+def print_max_only(aps, duration, limit=10):
+    clients = [(ap["name"], c) for ap in aps for c in ap["wifi"]]
+    clients.sort(key=lambda item: item[1]["tx"] or 0, reverse=True)
+    print("Навантаження за %d с, топ-%d клієнтів за TX. TX: до пристрою (завантаження), RX: від пристрою (вивантаження).\n"
+          % (duration, limit))
+    rows = [(c["name"], c["ip"], ap_name, c["band"], c["signal"], format_rate(c["tx"]), format_rate(c["rx"]))
+            for ap_name, c in clients[:limit]]
+    print_table(("Пристрій", "IP", "Точка", "Діапазон", "Сигнал", "TX", "RX"), rows, "", 5)
+
+
+def print_report(aps, duration, host, show_zeros):
+    print("Навантаження за %d с. TX: до пристрою (завантаження), RX: від пристрою (вивантаження).\n" % duration)
+    for ap in aps:
+        title = ap["name"] + (" (%s)" % ap["ip"] if ap["ip"] else " (%s)" % host if ap["name"] == ROUTER_NAME else "")
+        wifi_tx = sum(c["tx"] or 0 for c in ap["wifi"])
+        wifi_rx = sum(c["rx"] or 0 for c in ap["wifi"])
+        shown = ap["wifi"] if show_zeros else [c for c in ap["wifi"] if not is_idle(c)]
+        print(title)
+        if ap["port"]:
+            print("  порт %s до точки: TX %s, RX %s" % (ap["port"], format_rate(ap["port_tx"]), format_rate(ap["port_rx"])))
+        print("  Wi-Fi клієнтів: %d, разом TX %s, RX %s" % (len(ap["wifi"]), format_rate(wifi_tx), format_rate(wifi_rx)))
+        if shown:
+            rows = [(c["name"], c["ip"], c["band"], c["signal"], format_rate(c["tx"]), format_rate(c["rx"])) for c in shown]
+            print_table(("Пристрій", "IP", "Діапазон", "Сигнал", "TX", "RX"), rows, "    ", 4)
+        hidden = len(ap["wifi"]) - len(shown)
+        if hidden:
+            print("    ще %d без трафіку приховано (--show-zeros)" % hidden)
+        if ap["wired"]:
+            print("  Дротові (або без запису в Wi-Fi), окремих лічильників немає:")
+            for client in ap["wired"]:
+                print("    %s  %s  %s" % (client["name"], client["ip"], client["mac"]))
+        print()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Підсумок навантаження на мережу по пристроях (на основі /tool torch)")
-    parser.add_argument("--host", default="192.168.89.1", help="адреса роутера (за замовчуванням 192.168.89.1)")
+    parser = argparse.ArgumentParser(description="Які пристрої до якої точки підключені і яке навантаження вони створюють")
+    parser.add_argument("--host", default="192.168.89.1", help="адреса RB4011 (за замовчуванням 192.168.89.1)")
     parser.add_argument("--user", default="admin", help="користувач SSH (за замовчуванням admin)")
-    parser.add_argument("--interface", default="bridge", help="інтерфейс для Torch (за замовчуванням bridge)")
-    parser.add_argument("--duration", type=int, default=10, help="тривалість вимірювання, секунди (за замовчуванням 10)")
-    parser.add_argument("--top", type=int, default=20, help="скільки рядків показати (за замовчуванням 20)")
-    parser.add_argument("--subnet", help="показувати лише адреси з цієї підмережі, наприклад 192.168.89.0/24")
-    parser.add_argument("--tty", action="store_true", help="запускати ssh з -tt (якщо без цього Torch нічого не виводить)")
-    parser.add_argument("--raw", metavar="ФАЙЛ", help="зберегти сирий вивід Torch у файл")
+    parser.add_argument("--duration", type=int, default=30, help="тривалість вимірювання, секунди (за замовчуванням 30)")
+    parser.add_argument("--show-zeros", action="store_true", help="показувати й клієнтів, у яких TX і RX дорівнюють 0bps")
+    parser.add_argument("--max-only", action="store_true",
+                        help="одна таблиця з 10 клієнтами з найбільшим TX, точка доступу в окремій колонці")
+    parser.add_argument("--raw", metavar="ФАЙЛ", help="зберегти сирий вивід роутера у файл")
     parser.add_argument("--input", metavar="ФАЙЛ", help="не підключатися до роутера, а розібрати збережений вивід")
     args = parser.parse_args()
 
     if args.duration < 1 or args.duration > 300:
         parser.error("--duration має бути від 1 до 300 секунд")
-    if args.top < 1:
-        parser.error("--top має бути не менше 1")
-    subnet = None
-    if args.subnet:
-        try:
-            subnet = ipaddress.IPv4Network(args.subnet, strict=False)
-        except ValueError:
-            parser.error("некоректна підмережа: %r" % args.subnet)
 
     if args.input:
         with open(args.input, encoding="utf-8", errors="replace") as handle:
             text = handle.read()
     else:
-        print("Вимірюю трафік %d с на %s (інтерфейс %s)..." % (args.duration, args.host, args.interface), file=sys.stderr)
-        text = run_torch(args.host, args.user, args.interface, args.duration, args.tty)
+        print("Вимірюю трафік %d с на %s..." % (args.duration, args.host), file=sys.stderr)
+        text = run_router(args.host, args.user, args.duration)
     if args.raw:
         with open(args.raw, "w", encoding="utf-8") as handle:
             handle.write(text)
         print("Сирий вивід збережено в %s" % args.raw, file=sys.stderr)
 
-    result, frames, parsed_lines = summarize(text, subnet)
-    if parsed_lines == 0:
-        print("Не вдалося розібрати жодного рядка Torch (отримано %d символів)." % len(text), file=sys.stderr)
-        print("Спробуйте --tty, а для діагностики --raw файл і перегляньте його вміст.", file=sys.stderr)
-        return 1
-    if not result:
-        print("Torch повернув %d рядків, але жоден не належить підмережі %s." % (parsed_lines, subnet), file=sys.stderr)
-        return 1
-    print_table(result, frames, args.top)
+    aps = analyze(text, args.duration)
+    if args.max_only:
+        print_max_only(aps, args.duration)
+    else:
+        print_report(aps, args.duration, args.host, args.show_zeros)
     return 0
 
 
