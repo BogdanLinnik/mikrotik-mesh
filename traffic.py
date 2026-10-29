@@ -170,7 +170,11 @@ def analyze(text, duration):
     sections = split_sections(text)
     if "reg2" not in sections or "if2" not in sections:
         raise SystemExit("У виводі роутера немає другого зрізу лічильників (вивід обірвано?).")
+    return analyze_sections(sections, duration)
 
+
+def analyze_sections(sections, duration):
+    """Те саме, що analyze, але з уже розібраними секціями (static_*, reg1/if1 і reg2/if2)."""
     caps = parse_terse(sections.get("static_caps", []))
     hosts = parse_terse(sections.get("static_hosts", []))
     leases = parse_terse(sections.get("static_leases", []))
