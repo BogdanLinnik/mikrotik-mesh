@@ -24,6 +24,7 @@ TEMPLATES = ROOT / "templates"
 
 LAN_PREFIX = "192.168.89."  # підмережа LAN, роутер має адресу LAN_PREFIX + 1
 DEFAULT_LEASE_RANGE = "20-254"
+DEFAULT_MIN_SIGNAL = "-80"
 PLACEHOLDER_PASSWORDS = {"change-me", "change-me-too"}
 PLACEHOLDER_RE = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
 
@@ -76,6 +77,21 @@ def parse_count(env, key, errors):
     return count
 
 
+def parse_min_signal(value, errors):
+    """Правило access-list для відхилення слабкого сигналу (MIN_SIGNAL, дБм) або коментар, якщо воно вимкнене."""
+    if value.lower() in ("off", "none", "no", "false"):
+        return "# Мінімальний рівень сигналу вимкнено (MIN_SIGNAL=off), правило не створюється"
+    try:
+        level = int(value)
+    except ValueError:
+        errors.append("MIN_SIGNAL має бути цілим числом дБм (наприклад -80) або off, зараз: %r" % value)
+        return ""
+    if not -100 <= level <= -50:
+        errors.append("MIN_SIGNAL має бути від -100 до -50 дБм, зараз: %d" % level)
+        return ""
+    return "add action=reject signal-range=-120..%d comment=min-signal" % level
+
+
 def parse_bool(value):
     """Тип параметра для argparse: true/false, yes/no, 1/0 (без урахування регістру)."""
     lowered = value.strip().lower()
@@ -118,6 +134,7 @@ def validate(env, show_separate, lease_range):
     wifi_password = required("WIFI_PASSWORD")
     ssid = required("WIFI_SSID")
     country = env.get("WIFI_COUNTRY", "") or "Ukraine"
+    min_signal = env.get("MIN_SIGNAL", "").strip() or DEFAULT_MIN_SIGNAL
 
     if admin_password in PLACEHOLDER_PASSWORDS:
         errors.append("ADMIN_PASSWORD містить значення-приклад з .env.example, задайте свій пароль")
@@ -130,6 +147,8 @@ def validate(env, show_separate, lease_range):
         errors.append("WIFI_SSID задовгий: SSID для 5 ГГц (з суфіксом -5g) має вміщатися в 32 байти")
     elif ssid and len(ssid.encode("utf-8")) > 32:
         errors.append("WIFI_SSID задовгий: SSID має вміщатися в 32 байти")
+
+    min_signal_rule = parse_min_signal(min_signal, errors)
 
     ac3_count = parse_count(env, "AC3_COUNT", errors)
     ax3_count = parse_count(env, "AX3_COUNT", errors)
@@ -144,6 +163,7 @@ def validate(env, show_separate, lease_range):
         # В режимі однієї мережі SSID для 5 ГГц збігається з SSID для 2.4 ГГц
         "SSID_5G": routeros_escape(ssid + "-5g" if show_separate else ssid),
         "COUNTRY": routeros_escape(country),
+        "MIN_SIGNAL_RULE": min_signal_rule,
         "POOL_RANGE": "%s%d-%s%d" % (LAN_PREFIX, lease_range[0], LAN_PREFIX, lease_range[1]),
         "LEASE_COUNT": lease_range[1] - lease_range[0] + 1,
         "WIFI_MODE": ("окремі мережі: 2.4 ГГц і 5 ГГц (-5g)" if show_separate
@@ -166,7 +186,7 @@ def render(template_name, values):
 def devices(config):
     """Повертає список (ім'я файлу, шаблон, параметри). Імена пристроїв унікальні в межах мережі."""
     common = {key: config[key] for key in (
-        "ADMIN_PASSWORD", "WIFI_PASSWORD", "SSID_2G", "SSID_5G", "COUNTRY", "POOL_RANGE", "WIFI_MODE")}
+        "ADMIN_PASSWORD", "WIFI_PASSWORD", "SSID_2G", "SSID_5G", "COUNTRY", "POOL_RANGE", "WIFI_MODE", "MIN_SIGNAL_RULE")}
     result = [("rb4011", "rb4011.rsc.tpl", dict(common, IDENTITY="rb4011"))]
     for index in range(1, config["AC3_COUNT"] + 1):
         identity = "ac3-%d" % index

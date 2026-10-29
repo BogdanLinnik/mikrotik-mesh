@@ -11,3 +11,4 @@ backups/
 __pycache__/
 .DS_Store
 sample.txt 
+.vscode/
