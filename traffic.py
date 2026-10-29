@@ -17,6 +17,7 @@ TX: від точки до пристрою (завантаження на пр�
     python3 traffic.py --show-zeros         # показати й клієнтів без трафіку (за замовчуванням вони приховані)
     python3 traffic.py --max-only           # одна таблиця: 10 найактивніших клієнтів за TX, точка в окремій колонці
     python3 traffic.py --max-only --source ax3-1   # те саме, але лише клієнти однієї точки
+    python3 traffic.py --client-mac AA:BB:CC:DD:EE:FF   # статистика лише по одному клієнту
     python3 traffic.py --raw sample.txt     # зберегти сирий вивід роутера у файл
     python3 traffic.py --input sample.txt   # не підключатися до роутера, а розібрати збережений вивід
 
@@ -254,6 +255,22 @@ def print_table(header, rows, indent, left_columns):
         print(indent + "  ".join(cells))
 
 
+def parse_mac(value):
+    """Тип параметра --client-mac для argparse: MAC з двокрапками або дефісами в будь-якому регістрі."""
+    mac = value.strip().upper().replace("-", ":")
+    if not re.fullmatch(r"([0-9A-F]{2}:){5}[0-9A-F]{2}", mac):
+        raise argparse.ArgumentTypeError("очікується MAC-адреса виду AA:BB:CC:DD:EE:FF, зараз: %r" % value)
+    return mac
+
+
+def filter_client(aps, mac):
+    """Залишає в кожній точці лише клієнта з цією MAC-адресою (Wi-Fi чи дротового); без mac повертає aps як є."""
+    if not mac:
+        return aps
+    return [dict(ap, wifi=[c for c in ap["wifi"] if c["mac"] == mac], wired=[c for c in ap["wired"] if c["mac"] == mac])
+            for ap in aps]
+
+
 def select_source(aps, source):
     """Повертає точну назву точки за введеною (без урахування регістру) або завершує роботу з переліком доступних."""
     names = [ap["name"] for ap in aps]
@@ -263,20 +280,32 @@ def select_source(aps, source):
     raise SystemExit("Точку %r не знайдено. Доступні: %s" % (source, ", ".join(names)))
 
 
-def print_max_only(aps, duration, limit=10, source=None):
+def print_max_only(aps, duration, limit=10, source=None, client_mac=None):
     if source:
         source = select_source(aps, source)
+    aps = filter_client(aps, client_mac)
     clients = [(ap["name"], c) for ap in aps for c in ap["wifi"] if not source or ap["name"] == source]
     clients.sort(key=lambda item: item[1]["tx"] or 0, reverse=True)
-    print("Навантаження за %d с, топ-%d клієнтів за TX%s. TX: до пристрою (завантаження), RX: від пристрою (вивантаження).\n"
-          % (duration, limit, " на точці " + source if source else ""))
+    print("Навантаження за %d с, топ-%d клієнтів за TX%s%s. TX: до пристрою (завантаження), RX: від пристрою (вивантаження).\n"
+          % (duration, limit, " на точці " + source if source else "", ", клієнт " + client_mac if client_mac else ""))
+    if client_mac and not clients:
+        print("Клієнта %s немає серед підключених по Wi-Fi%s. Дротові пристрої не мають лічильників."
+              % (client_mac, " на точці " + source if source else ""))
+        return
     rows = [(c["name"], c["ip"], ap_name, c["band"], c["signal"], format_rate(c["tx"]), format_rate(c["rx"]))
             for ap_name, c in clients[:limit]]
     print_table(("Пристрій", "IP", "Точка", "Діапазон", "Сигнал", "TX", "RX"), rows, "", 5)
 
 
-def print_report(aps, duration, host, show_zeros):
-    print("Навантаження за %d с. TX: до пристрою (завантаження), RX: від пристрою (вивантаження).\n" % duration)
+def print_report(aps, duration, host, show_zeros, client_mac=None):
+    print("Навантаження за %d с%s. TX: до пристрою (завантаження), RX: від пристрою (вивантаження).\n"
+          % (duration, ", клієнт " + client_mac if client_mac else ""))
+    if client_mac:
+        show_zeros = True  # клієнта вказано явно, тож показуємо його навіть без трафіку
+        aps = [ap for ap in filter_client(aps, client_mac) if ap["wifi"] or ap["wired"]]
+        if not aps:
+            print("Клієнта %s не знайдено серед підключених." % client_mac)
+            return
     for ap in aps:
         title = ap["name"] + (" (%s)" % ap["ip"] if ap["ip"] else " (%s)" % host if ap["name"] == ROUTER_NAME else "")
         wifi_tx = sum(c["tx"] or 0 for c in ap["wifi"])
@@ -307,6 +336,8 @@ def main():
     parser.add_argument("--show-zeros", action="store_true", help="показувати й клієнтів, у яких TX і RX дорівнюють 0bps")
     parser.add_argument("--max-only", action="store_true",
                         help="одна таблиця з 10 клієнтами з найбільшим TX, точка доступу в окремій колонці")
+    parser.add_argument("--client-mac", type=parse_mac, metavar="MAC",
+                        help="показати статистику лише цього клієнта (AA:BB:CC:DD:EE:FF)")
     parser.add_argument("--source", metavar="ТОЧКА",
                         help="з --max-only: лише клієнти цієї точки (rb4011, ac3-1, ax3-2, ...)")
     parser.add_argument("--raw", metavar="ФАЙЛ", help="зберегти сирий вивід роутера у файл")
@@ -331,9 +362,9 @@ def main():
 
     aps = analyze(text, args.duration)
     if args.max_only:
-        print_max_only(aps, args.duration, source=args.source)
+        print_max_only(aps, args.duration, source=args.source, client_mac=args.client_mac)
     else:
-        print_report(aps, args.duration, args.host, args.show_zeros)
+        print_report(aps, args.duration, args.host, args.show_zeros, args.client_mac)
     return 0
 
 

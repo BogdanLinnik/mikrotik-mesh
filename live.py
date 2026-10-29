@@ -8,7 +8,7 @@
 TX: від точки до пристрою (завантаження на пристрій), RX: від пристрою до точки (вивантаження з пристрою).
 
 Використання:
-    python3 live.py [--host 192.168.89.1] [--user admin] [--interval 5] [--top 10] [--source ax3-1]
+    python3 live.py [--host 192.168.89.1] [--user admin] [--interval 5] [--top 10] [--source ax3-1] [--client-mac AA:BB:CC:DD:EE:FF]
 Вихід: Ctrl+C. Пароль SSH запитує сам ssh один раз, далі з'єднання використовується повторно.
 Залежностей немає, потрібен лише Python 3 і ssh.
 """
@@ -84,10 +84,10 @@ class Router:
         shutil.rmtree(self.directory, ignore_errors=True)
 
 
-def render(aps, seconds, top, interval, source):
+def render(aps, seconds, top, interval, source, client_mac):
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        traffic.print_max_only(aps, seconds, top, source)
+        traffic.print_max_only(aps, seconds, top, source, client_mac)
     return buffer.getvalue() + "\nОновлення кожні %d с, %s. Вихід: Ctrl+C\n" % (interval, time.strftime("%H:%M:%S"))
 
 
@@ -107,6 +107,8 @@ def main():
     parser.add_argument("--top", type=int, default=10, help="скільки клієнтів показувати (за замовчуванням 10)")
     parser.add_argument("--source", metavar="ТОЧКА",
                         help="показувати лише клієнтів цієї точки (rb4011, ac3-1, ax3-2, ...), за замовчуванням усіх")
+    parser.add_argument("--client-mac", type=traffic.parse_mac, metavar="MAC",
+                        help="показувати лише цього клієнта (AA:BB:CC:DD:EE:FF)")
     parser.add_argument("--count", type=int, default=0, help="зупинитися після стількох оновлень (0 = без обмеження)")
     args = parser.parse_args()
     if not 2 <= args.interval <= 60:
@@ -141,7 +143,7 @@ def main():
                     sections["reg1"], sections["if1"] = previous["reg"], previous["if"]
                     sections["reg2"], sections["if2"] = current["reg"], current["if"]
                     seconds = now - previous_time
-                    show(render(traffic.analyze_sections(sections, seconds), round(seconds), args.top, args.interval, args.source),
+                    show(render(traffic.analyze_sections(sections, seconds), round(seconds), args.top, args.interval, args.source, args.client_mac),
                          interactive)
                     shown += 1
                     if args.count and shown >= args.count:
