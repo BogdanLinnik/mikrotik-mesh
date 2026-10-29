@@ -22,7 +22,7 @@
   :local zeros false
   :if ([:typeof $showZeros] != "nothing") do={ :if ([:tostr $showZeros] = "yes" || [:tostr $showZeros] = "true") do={ :set zeros true } }
 
-  # Character replacement: every char found in string "from" is replaced by the char at the same position in "to"
+  # Character replacement: every char ,found in string "from" is replaced by the char at the same position in "to"
   :local conv do={
     :local out ""
     :for i from=0 to=([:len $s] - 1) do={
